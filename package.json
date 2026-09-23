@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/REllwood/data-selfie.git"
+    "url": "git+https://github.com/REllwood/DataSelfie.git"
   },
-  "homepage": "https://github.com/REllwood/data-selfie#readme",
+  "homepage": "https://github.com/REllwood/DataSelfie#readme",
   "bugs": {
-    "url": "https://github.com/REllwood/data-selfie/issues"
+    "url": "https://github.com/REllwood/DataSelfie/issues"
   },
   "type": "module",
   "engines": {
