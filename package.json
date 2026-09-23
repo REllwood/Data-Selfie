@@ -1,0 +1,25 @@
+{
+  "name": "data-selfie",
+  "version": "0.1.0",
+  "description": "Explore a personal data export as a local, evidence-linked portrait of your digital habits.",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/REllwood/data-selfie.git"
+  },
+  "homepage": "https://github.com/REllwood/data-selfie#readme",
+  "bugs": {
+    "url": "https://github.com/REllwood/data-selfie/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check:syntax": "node --check src/csv.js && node --check src/analysis.js && node --check src/server.js && node --check public/app.js",
+    "check": "npm test && npm run check:syntax"
+  }
+}

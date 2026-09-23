@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Data Selfie local portrait workbench</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="kicker">Local evidence-linked data portrait</p>
+        <h1>Data Selfie</h1>
+      </div>
+      <p class="local-boundary">Local browser processing · no upload or inference</p>
+    </header>
+
+    <main>
+      <section class="import-desk" aria-labelledby="import-heading">
+        <div>
+          <p class="section-number">01 / Source and schema</p>
+          <h2 id="import-heading">Choose a CSV export</h2>
+        </div>
+        <p>The selected file remains in this browser tab. Version 0.1 accepts one CSV up to 8 MiB and does not inspect folders, archives or media.</p>
+
+        <label for="csv-file">Local CSV file</label>
+        <input id="csv-file" type="file" accept=".csv,text/csv">
+        <button id="fixture-button" class="secondary" type="button">Use documented fixture</button>
+
+        <div id="source-summary" class="source-summary">No source selected.</div>
+
+        <form id="mapping-form">
+          <fieldset disabled id="mapping-fields">
+            <legend>Map source columns</legend>
+            <div id="mapping-controls"></div>
+            <button id="analyse-button" type="submit">Analyse selected CSV</button>
+          </fieldset>
+        </form>
+
+        <details>
+          <summary>Header and value preview</summary>
+          <div id="preview-table" class="preview-table">
+            <p>A bounded preview will appear after selecting a source.</p>
+          </div>
+        </details>
+
+        <div class="progress-region">
+          <div id="operation-status" class="operation-status" role="status" aria-live="polite">Ready for a local file.</div>
+          <progress id="import-progress" max="1" value="0">0%</progress>
+          <button id="cancel-button" class="secondary" type="button" disabled>Cancel current operation</button>
+        </div>
+      </section>
+
+      <section class="coverage-desk" aria-labelledby="coverage-heading">
+        <div>
+          <p class="section-number">02 / Coverage before interpretation</p>
+          <h2 id="coverage-heading">What the source can support</h2>
+        </div>
+        <dl id="coverage-summary" class="coverage-summary">
+          <div><dt>Imported rows</dt><dd>—</dd></div>
+          <div><dt>Accepted rows</dt><dd>—</dd></div>
+          <div><dt>Duplicate rows</dt><dd>—</dd></div>
+          <div><dt>Malformed rows</dt><dd>—</dd></div>
+        </dl>
+        <ul id="warning-list" class="warning-list">
+          <li>Warnings will appear after analysis.</li>
+        </ul>
+      </section>
+
+      <section class="portrait-desk" aria-labelledby="portrait-heading">
+        <header>
+          <div>
+            <p class="section-number">03 / Descriptive texture</p>
+            <h2 id="portrait-heading">Local aggregate portrait</h2>
+          </div>
+          <p id="aggregate-boundary">No aggregate tables yet.</p>
+        </header>
+
+        <div class="aggregate-section">
+          <h3>Category distribution</h3>
+          <div id="category-bars" class="bar-list"><p>Analyse a source to begin.</p></div>
+        </div>
+        <div class="aggregate-section">
+          <h3>Hour written in source timestamp</h3>
+          <div id="hour-bars" class="bar-list compact-bars"><p>Analyse a source to begin.</p></div>
+        </div>
+        <div class="aggregate-section">
+          <h3>Daily texture</h3>
+          <div id="daily-bars" class="bar-list"><p>Analyse a source to begin.</p></div>
+        </div>
+        <div class="aggregate-section">
+          <h3>Explicitly mapped entities, local view only</h3>
+          <div id="entity-bars" class="bar-list"><p>No entity mapping analysed.</p></div>
+        </div>
+      </section>
+
+      <aside class="provenance-desk" aria-labelledby="provenance-heading">
+        <p class="section-number">04 / Calculation inspector</p>
+        <h2 id="provenance-heading">Trace a visual mark</h2>
+        <p id="calculation-definition">Select an aggregate mark to inspect its definition and bounded source coverage.</p>
+        <ol id="source-references" class="source-references"></ol>
+      </aside>
+
+      <section class="export-desk" aria-labelledby="export-heading">
+        <div>
+          <p class="section-number">05 / Selective portrait</p>
+          <h2 id="export-heading">Prepare a privacy-safe page</h2>
+        </div>
+        <p>Raw events, source filenames and record identifiers never enter the portrait. Original category and entity labels remain excluded unless selected explicitly because either may contain personal information.</p>
+        <label for="portrait-title">Portrait title</label>
+        <input id="portrait-title" type="text" maxlength="120" value="My local listening portrait">
+        <label for="portrait-note">My observation</label>
+        <textarea id="portrait-note" rows="4" maxlength="2000" placeholder="Write your own context; the application does not interpret the pattern."></textarea>
+
+        <fieldset id="export-sections" disabled>
+          <legend>Sections to include</legend>
+          <label><input type="checkbox" name="daily" checked> Daily aggregates</label>
+          <label><input type="checkbox" name="hourly" checked> Hourly aggregates</label>
+          <label><input type="checkbox" name="categories" checked> Category aggregates</label>
+          <label class="sensitive-choice"><input type="checkbox" name="categoryLabels"> Original category labels, replaced with neutral labels by default</label>
+          <label><input type="checkbox" name="warnings" checked> Coverage warnings</label>
+          <label class="sensitive-choice"><input type="checkbox" name="entities"> Entity labels, excluded by default</label>
+        </fieldset>
+
+        <div class="button-row">
+          <button id="prepare-export" type="button" disabled>Prepare static portrait</button>
+          <button id="download-export" class="secondary" type="button" disabled>Download portrait HTML</button>
+        </div>
+        <label for="export-preview">Portrait privacy and coverage preview</label>
+        <textarea id="export-preview" rows="12" readonly></textarea>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

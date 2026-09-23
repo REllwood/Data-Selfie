@@ -1,0 +1,176 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import {
+  PersonalDataAccumulator,
+  createPortrait,
+  createPortraitHtml,
+  parseWallTimestamp,
+  validateMapping
+} from "../src/analysis.js";
+import { collectCsvRows } from "../src/csv.js";
+
+const fixtureUrl = new URL("../examples/synthetic-listening.csv", import.meta.url);
+const fixtureText = await readFile(fixtureUrl, "utf8");
+const fixtureRows = await collectCsvRows(
+  (async function* fixtureChunks() {
+    for (let index = 0; index < fixtureText.length; index += 37) {
+      yield fixtureText.slice(index, index + 37);
+    }
+  })()
+);
+const headers = fixtureRows[0].values;
+const mapping = {
+  timestamp: "played_at",
+  category: "context",
+  entity: "artist",
+  duration: "duration_seconds",
+  recordId: "event_id"
+};
+
+function analyse() {
+  const accumulator = new PersonalDataAccumulator({
+    source: {
+      name: "synthetic-listening.csv",
+      size: fixtureText.length,
+      lastModified: 0
+    },
+    headers,
+    mapping
+  });
+  for (const row of fixtureRows.slice(1)) {
+    accumulator.ingest(row.values, row.rowNumber);
+  }
+  return accumulator.finalise();
+}
+
+test("the documented fixture has stable counts and deterministic aggregates", () => {
+  const first = analyse();
+  const second = analyse();
+  assert.deepEqual(second, first);
+  assert.equal(first.dataset.importedRows, 13);
+  assert.equal(first.dataset.acceptedRows, 11);
+  assert.equal(first.dataset.duplicateRows, 1);
+  assert.equal(first.dataset.malformedRows, 1);
+  assert.deepEqual(first.coverage.missingMonths, ["2025-06"]);
+  assert.equal(first.aggregates.categories.reduce((sum, item) => sum + item.count, 0), 11);
+});
+
+test("timezone, duplicate, malformed and missing-period warnings remain distinct", () => {
+  const analysis = analyse();
+  const codes = analysis.warnings.map((warning) => warning.code);
+  assert.ok(codes.includes("duplicate-record"));
+  assert.ok(codes.includes("invalid-timestamp"));
+  assert.ok(codes.includes("missing-period"));
+  assert.ok(codes.includes("missing-timezone"));
+  assert.ok(codes.includes("timezone-offset-change"));
+});
+
+test("every non-empty aggregate mark has bounded source provenance", () => {
+  const analysis = analyse();
+  for (const table of Object.values(analysis.aggregates)) {
+    for (const mark of table.filter((item) => item.count > 0)) {
+      assert.equal(mark.provenance.sourceRowCount, mark.count);
+      assert.ok(mark.provenance.sources.length > 0);
+      assert.ok(mark.provenance.sources.length <= 24);
+      assert.ok(mark.provenance.sources.every((source) => source.file && source.row >= 2));
+    }
+  }
+});
+
+test("mapping rejects missing and repeated source columns", () => {
+  assert.throws(
+    () => validateMapping(headers, { category: "context" }),
+    (error) => error.path === "mapping.timestamp"
+  );
+  assert.throws(
+    () =>
+      validateMapping(headers, {
+        timestamp: "played_at",
+        category: "played_at"
+      }),
+    (error) => error.code === "DUPLICATE_MAPPING"
+  );
+  assert.throws(
+    () => validateMapping(headers, {
+      timestamp: "played_at",
+      category: "context",
+      timezone: "timezone_name"
+    }),
+    (error) => error.code === "UNSUPPORTED_MAPPING"
+  );
+});
+
+test("default portrait export excludes raw and identifying source material", () => {
+  const analysis = analyse();
+  const portrait = createPortrait(analysis, {
+    title: "Listening texture",
+    note: "I remember changing routines in winter."
+  });
+  const serialised = JSON.stringify(portrait);
+  assert.equal(portrait.privacy.rawEventsIncluded, false);
+  assert.equal(portrait.privacy.entityLabelsIncluded, false);
+  assert.equal(portrait.privacy.categoryLabelsIncluded, false);
+  assert.equal(portrait.privacy.sourceFilenameIncluded, false);
+  assert.doesNotMatch(serialised, /Aria North|focus|commute|evt-001|synthetic-listening\.csv/);
+  assert.match(createPortraitHtml(portrait), /Interpretation boundary/);
+});
+
+test("entity labels enter a portrait only through explicit selection", () => {
+  const portrait = createPortrait(analyse(), { entities: true });
+  assert.equal(portrait.privacy.entityLabelsIncluded, true);
+  assert.match(JSON.stringify(portrait), /Aria North/);
+});
+
+test("invalid rows do not reserve a duplicate identifier", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "dedup.csv" },
+    headers: ["timestamp", "category", "duration", "id"],
+    mapping: {
+      timestamp: "timestamp",
+      category: "category",
+      duration: "duration",
+      recordId: "id"
+    }
+  });
+  accumulator.ingest(["2026-01-01T12:00:00Z", "focus", "invalid", "same"], 2);
+  accumulator.ingest(["2026-01-01T12:00:00Z", "focus", "30", "same"], 3);
+  const result = accumulator.finalise();
+  assert.equal(result.dataset.acceptedRows, 1);
+  assert.equal(result.dataset.malformedRows, 1);
+  assert.equal(result.dataset.duplicateRows, 0);
+});
+
+test("timestamp validation rejects impossible dates and offsets", () => {
+  assert.throws(() => parseWallTimestamp("2026-02-31T12:00Z"), /impossible/);
+  assert.throws(() => parseWallTimestamp("2026-01-01T24:00Z"), /impossible/);
+  assert.throws(() => parseWallTimestamp("2026-01-01T12:00+25:00"), /impossible/);
+  assert.equal(parseWallTimestamp("2024-02-29T23:59:30+11:00").date, "2024-02-29");
+});
+
+test("category labels require explicit inclusion and are disclosed conservatively", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "private.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" }
+  });
+  accumulator.ingest(["2026-01-01T12:00Z", "person@example.test"], 2);
+  const result = accumulator.finalise();
+  const defaultPortrait = createPortrait(result);
+  assert.doesNotMatch(JSON.stringify(defaultPortrait), /person@example\.test/);
+  assert.equal(defaultPortrait.privacy.sourceLabelsMayContainContactOrLocationData, false);
+  const labelledPortrait = createPortrait(result, { categoryLabels: true });
+  assert.match(JSON.stringify(labelledPortrait), /person@example\.test/);
+  assert.equal(labelledPortrait.privacy.sourceLabelsMayContainContactOrLocationData, true);
+});
+
+test("portrait text overflow is rejected rather than silently truncated", () => {
+  assert.throws(
+    () => createPortrait(analyse(), { title: "x".repeat(121) }),
+    (error) => error.code === "PORTRAIT_TEXT_LIMIT"
+  );
+  assert.throws(
+    () => createPortrait(analyse(), { note: "x".repeat(2_001) }),
+    (error) => error.code === "PORTRAIT_TEXT_LIMIT"
+  );
+});

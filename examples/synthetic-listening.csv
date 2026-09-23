@@ -1,0 +1,14 @@
+played_at,artist,track,context,duration_seconds,event_id,timezone_name
+2025-01-05T08:15:00+11:00,Aria North,Harbour,focus,210,evt-001,Australia/Melbourne
+2025-02-10T18:42:00+11:00,The Paper Maps,Window Seat,commute,188,evt-002,Australia/Melbourne
+2025-03-14T07:20:00+11:00,Aria North,Morning Lines,focus,242,evt-003,Australia/Melbourne
+2025-04-22T21:05:00+10:00,Soft Static,After Rain,evening,301,evt-004,Australia/Melbourne
+2025-05-09T12:30:00+10:00,The Paper Maps,Low Tide,discovery,199,evt-005,Australia/Melbourne
+2025-07-01T09:00:00+10:00,Aria North,Small Hours,focus,233,evt-006,Australia/Melbourne
+2025-08-16T16:10:00+10:00,Soft Static,"A track, with a comma",discovery,277,evt-007,Australia/Melbourne
+2025-09-03T11:45:00,The Paper Maps,"=HYPERLINK(""https://invalid.example"")",commute,205,evt-008,Australia/Melbourne
+2025-10-18T20:55:00+11:00,Aria North,Signal Fire,evening,256,evt-009,Australia/Melbourne
+2025-11-07T06:40:00+11:00,Soft Static,First Light,focus,284,evt-010,Australia/Melbourne
+2025-12-29T22:15:00+11:00,The Paper Maps,Return Route,evening,222,evt-011,Australia/Melbourne
+2025-04-22T21:05:00+10:00,Soft Static,After Rain,evening,301,evt-004,Australia/Melbourne
+not-a-time,Fixture Error,Excluded Row,focus,120,evt-bad,Australia/Melbourne
