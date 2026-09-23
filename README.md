@@ -25,8 +25,8 @@ Most apps will hand over your data as a CSV export, and most people never open i
 Requires Node.js 22 or newer. No `npm install` needed.
 
 ```sh
-git clone https://github.com/REllwood/DataSelfie.git
-cd DataSelfie
+git clone https://github.com/REllwood/Data-Selfie.git
+cd Data-Selfie
 npm start
 ```
 
