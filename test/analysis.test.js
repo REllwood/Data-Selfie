@@ -133,7 +133,7 @@ test("invalid rows do not reserve a duplicate identifier", () => {
       recordId: "id"
     }
   });
-  accumulator.ingest(["2026-01-01T12:00:00Z", "focus", "invalid", "same"], 2);
+  accumulator.ingest(["2026-01-01T12:00:00Z", "", "30", "same"], 2);
   accumulator.ingest(["2026-01-01T12:00:00Z", "focus", "30", "same"], 3);
   const result = accumulator.finalise();
   assert.equal(result.dataset.acceptedRows, 1);
@@ -360,4 +360,59 @@ test("portraits record the time basis but never the reporting time zone", () => 
   assert.equal(portrait.privacy.reportingTimeZoneIncluded, false);
   assert.doesNotMatch(JSON.stringify(portrait), /Melbourne|Australia/);
   assert.doesNotMatch(createPortraitHtml(portrait), /Melbourne|Australia/);
+});
+
+function durationAccumulator(durationUnit) {
+  return new PersonalDataAccumulator({
+    source: { name: "durations.csv" },
+    headers: ["timestamp", "category", "duration"],
+    mapping: { timestamp: "timestamp", category: "category", duration: "duration" },
+    ...(durationUnit ? { durationUnit } : {})
+  });
+}
+
+test("rows with unreadable or out-of-range durations are kept without their duration", () => {
+  const accumulator = durationAccumulator();
+  const values = ["0x10", "1e3", "-5", "1,000", "Infinity", "12 s", "86401", "30"];
+  values.forEach((duration, index) =>
+    accumulator.ingest([`2025-01-0${(index % 9) + 1}T08:00Z`, "focus", duration], index + 2)
+  );
+  const result = accumulator.finalise();
+  assert.equal(result.dataset.acceptedRows, values.length);
+  assert.equal(result.dataset.malformedRows, 0);
+  assert.equal(result.aggregates.categories[0].count, values.length);
+  assert.equal(result.aggregates.categories[0].durationSeconds, 30);
+  const warning = result.warnings.find((item) => item.code === "invalid-duration");
+  assert.equal(warning.count, values.length - 1);
+  assert.match(warning.message, /were kept/);
+});
+
+test("millisecond durations are converted to seconds", () => {
+  const accumulator = durationAccumulator("milliseconds");
+  accumulator.ingest(["2025-01-01T08:00Z", "focus", "180000"], 2);
+  accumulator.ingest(["2025-01-01T09:00Z", "focus", "1500.5"], 3);
+  const result = accumulator.finalise();
+  assert.equal(result.aggregates.categories[0].durationSeconds, 181.501);
+  assert.equal(result.dataset.durationUnit, "milliseconds");
+  assert.ok(!result.warnings.some((item) => item.code === "invalid-duration"));
+});
+
+test("a day-long limit applies after unit conversion", () => {
+  const accumulator = durationAccumulator("milliseconds");
+  accumulator.ingest(["2025-01-01T08:00Z", "focus", "86400000"], 2);
+  accumulator.ingest(["2025-01-01T09:00Z", "focus", "86400001"], 3);
+  const result = accumulator.finalise();
+  assert.equal(result.aggregates.categories[0].durationSeconds, 86_400);
+  assert.equal(result.warnings.find((item) => item.code === "invalid-duration").count, 1);
+});
+
+test("summed durations are reported to the nearest millisecond", () => {
+  const accumulator = durationAccumulator();
+  accumulator.ingest(["2025-01-01T08:00Z", "focus", "0.1"], 2);
+  accumulator.ingest(["2025-01-01T09:00Z", "focus", "0.2"], 3);
+  assert.equal(accumulator.finalise().aggregates.categories[0].durationSeconds, 0.3);
+});
+
+test("an unknown duration unit is rejected", () => {
+  assert.throws(() => durationAccumulator("minutes"), (error) => error.code === "INVALID_DURATION_UNIT");
 });

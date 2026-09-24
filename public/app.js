@@ -5,7 +5,12 @@ const mappingDefinitions = [
   { field: "timestamp", label: "Timestamp", required: true, aliases: ["played_at", "timestamp", "date"] },
   { field: "category", label: "Category", required: true, aliases: ["context", "category", "type"] },
   { field: "entity", label: "Entity", required: false, aliases: ["artist", "entity", "topic"] },
-  { field: "duration", label: "Duration in seconds", required: false, aliases: ["duration_seconds", "duration"] },
+  {
+    field: "duration",
+    label: "Duration",
+    required: false,
+    aliases: ["duration_seconds", "duration", "seconds", "duration_ms", "ms_played", "msPlayed"]
+  },
   { field: "recordId", label: "Stable record identifier", required: false, aliases: ["event_id", "id", "record_id"] }
 ];
 
@@ -190,8 +195,20 @@ async function* fileTextChunks(file, signal) {
   }
 }
 
+// Returns the source header (in its original case) that matches the first alias.
 function proposedColumn(definition) {
-  return definition.aliases.find((alias) => headers.includes(alias)) ?? "";
+  for (const alias of definition.aliases) {
+    const header = headers.find((candidate) => candidate.toLowerCase() === alias.toLowerCase());
+    if (header !== undefined) {
+      return header;
+    }
+  }
+  return "";
+}
+
+// Headers such as ms_played, duration_ms or msPlayed usually hold milliseconds.
+function looksLikeMilliseconds(header) {
+  return /(^|[^A-Za-z])[mM][sS]($|[^a-z])|[a-z]Ms($|[^a-z])|[Mm]illis/.test(header);
 }
 
 function currentMapping() {
@@ -203,6 +220,10 @@ function currentMapping() {
       ])
       .filter(([, value]) => value !== "")
   );
+}
+
+function currentDurationUnit() {
+  return elements.mappingControls.querySelector('[name="durationUnit"]')?.value ?? "seconds";
 }
 
 // An empty value means dates and hours are counted as written.
@@ -240,9 +261,22 @@ function renderTimeZoneControl() {
   return wrapper;
 }
 
+function renderDurationUnitControl() {
+  const wrapper = document.createElement("label");
+  wrapper.textContent = "Duration unit";
+  const select = document.createElement("select");
+  select.name = "durationUnit";
+  appendOption(select, "seconds", "Seconds");
+  appendOption(select, "milliseconds", "Milliseconds");
+  const durationDefinition = mappingDefinitions.find((definition) => definition.field === "duration");
+  select.value = looksLikeMilliseconds(proposedColumn(durationDefinition)) ? "milliseconds" : "seconds";
+  wrapper.append(select);
+  return wrapper;
+}
+
 function renderMapping() {
   elements.mappingControls.replaceChildren(
-    ...mappingDefinitions.map((definition) => {
+    ...mappingDefinitions.flatMap((definition) => {
       const wrapper = document.createElement("label");
       wrapper.textContent = `${definition.label}${definition.required ? " (required)" : ""}`;
       const select = document.createElement("select");
@@ -259,7 +293,7 @@ function renderMapping() {
         select.append(option);
       }
       wrapper.append(select);
-      return wrapper;
+      return definition.field === "duration" ? [wrapper, renderDurationUnitControl()] : [wrapper];
     }),
     renderTimeZoneControl()
   );
@@ -489,6 +523,7 @@ elements.mappingForm.addEventListener("submit", async (event) => {
   const sourceHeaders = [...headers];
   const sourceMapping = currentMapping();
   const sourceTimeZone = currentTimeZone();
+  const sourceDurationUnit = currentDurationUnit();
   let accumulator;
   let operationSignal;
   try {
@@ -502,7 +537,8 @@ elements.mappingForm.addEventListener("submit", async (event) => {
         },
         headers: sourceHeaders,
         mapping: sourceMapping,
-        timeZone: sourceTimeZone || null
+        timeZone: sourceTimeZone || null,
+        durationUnit: sourceDurationUnit
       });
       let headerSeen = false;
       for await (const row of parseCsvChunks(fileTextChunks(sourceFile, signal), {
