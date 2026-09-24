@@ -41,7 +41,7 @@ The first row must be a header with unique column names. You map columns to thes
 | Timestamp | Yes | ISO 8601 date and time, e.g. `2025-01-05T08:15:00+11:00`. A space instead of `T`, fractional seconds, and zones written as `Z`, `UTC`, `+10:00`, `+1000` or `+10` all work. Timestamps without a zone can't be converted, so they keep their written date and hour and are flagged. |
 | Category | Yes | Any text, such as a listening context |
 | Entity | No | Any text, such as an artist |
-| Duration | No | Seconds |
+| Duration | No | A plain number of seconds or milliseconds. You choose the unit, and columns such as `ms_played` are proposed as milliseconds. A row with an unreadable duration, or one longer than a day, is kept, but its duration isn't counted and it's flagged. |
 | Record ID | No | A stable identifier, used to detect duplicates |
 
 ### Time zones

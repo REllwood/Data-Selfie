@@ -9,6 +9,10 @@ const requiredMappingFields = Object.freeze(["timestamp", "category"]);
 const maxProvenanceRows = 24;
 const maxDistinctCategories = 2_000;
 const maxDistinctEntities = 10_000;
+const maxDurationSeconds = 86_400;
+// Divisors that convert a mapped duration to seconds.
+const durationUnits = Object.freeze({ seconds: 1, milliseconds: 1_000 });
+const plainDecimalPattern = /^\d+(?:\.\d+)?$/;
 // Converting outside these bounds could produce a year Intl renders with an
 // era or more than four digits.
 const earliestConvertibleTime = Date.parse("0001-01-02T00:00:00Z");
@@ -250,13 +254,19 @@ function monthRange(firstMonth, lastMonth) {
   return result;
 }
 
+// Floating-point sums of fractional or millisecond durations drift (0.1 + 0.2);
+// totals are reported to the nearest millisecond.
+function roundToMilliseconds(seconds) {
+  return Math.round(seconds * 1_000) / 1_000;
+}
+
 function serialiseBuckets(map) {
   return [...map.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, bucket]) => ({
       key,
       count: bucket.count,
-      durationSeconds: bucket.durationSeconds,
+      durationSeconds: roundToMilliseconds(bucket.durationSeconds),
       provenance: {
         sourceRowCount: bucket.sourceRowCount,
         sources: clone(bucket.sources),
@@ -285,13 +295,22 @@ export class PersonalDataAccumulator {
   #maxDate;
   #timeZone = null;
   #zoneFormatter;
+  #durationUnit;
 
   // timeZone is an IANA name such as "Australia/Melbourne". When it is omitted,
   // dates and hours are counted exactly as written in each timestamp.
-  constructor({ source, headers, mapping, timeZone = null }) {
+  constructor({ source, headers, mapping, timeZone = null, durationUnit = "seconds" }) {
     if (!source || typeof source.name !== "string") {
       throw new AnalysisError("Source name is required", "source.name");
     }
+    if (!Object.hasOwn(durationUnits, durationUnit)) {
+      throw new AnalysisError(
+        `Duration unit must be one of ${Object.keys(durationUnits).join(", ")}`,
+        "durationUnit",
+        "INVALID_DURATION_UNIT"
+      );
+    }
+    this.#durationUnit = durationUnit;
     const validated = validateMapping(headers, mapping);
     this.#source = {
       name: source.name,
@@ -319,6 +338,27 @@ export class PersonalDataAccumulator {
   #value(row, field) {
     const entry = this.#mapping[field];
     return entry ? String(row[entry.index] ?? "").trim() : "";
+  }
+
+  #durationSeconds(row, reference) {
+    const rawDuration = this.#value(row, "duration");
+    if (rawDuration === "") {
+      return 0;
+    }
+    // Plain decimals only: Number() would also accept "0x10", "1e3" and "Infinity".
+    const seconds = plainDecimalPattern.test(rawDuration)
+      ? Number(rawDuration) / durationUnits[this.#durationUnit]
+      : Number.NaN;
+    if (!(seconds <= maxDurationSeconds)) {
+      incrementWarning(
+        this.#warnings,
+        "invalid-duration",
+        `Rows with an unreadable duration, or one longer than ${maxDurationSeconds} seconds, were kept but their duration was not counted.`,
+        reference
+      );
+      return 0;
+    }
+    return seconds;
   }
 
   ingest(rowInput, rowNumber) {
@@ -389,22 +429,6 @@ export class PersonalDataAccumulator {
       );
       return;
     }
-    let durationSeconds = 0;
-    const rawDuration = this.#value(row, "duration");
-    if (rawDuration !== "") {
-      durationSeconds = Number(rawDuration);
-      if (!Number.isFinite(durationSeconds) || durationSeconds < 0 || durationSeconds > 86_400) {
-        this.#malformedRows += 1;
-        incrementWarning(
-          this.#warnings,
-          "invalid-duration",
-          "Rows with a mapped duration outside 0–86400 seconds were excluded.",
-          reference
-        );
-        return;
-      }
-    }
-
     const entity = this.#value(row, "entity");
     if (entity !== "" && !this.#entities.has(entity) && this.#entities.size >= maxDistinctEntities) {
       throw new AnalysisError(
@@ -415,6 +439,10 @@ export class PersonalDataAccumulator {
     }
 
     this.#seenIds.add(duplicateKey);
+
+    // Checked only for accepted rows. A bad duration costs the row its
+    // duration, not its place in the counts.
+    const durationSeconds = this.#durationSeconds(row, reference);
 
     // Zone bookkeeping only happens once the row is known to be accepted, so
     // excluded rows cannot raise zone warnings on their own.
@@ -502,6 +530,7 @@ export class PersonalDataAccumulator {
         acceptedRows: this.#acceptedRows,
         duplicateRows: this.#duplicateRows,
         malformedRows: this.#malformedRows,
+        durationUnit: this.#durationUnit,
         partial
       },
       coverage: {
@@ -539,7 +568,8 @@ export class PersonalDataAccumulator {
             }),
         categories: "Accepted, de-duplicated rows grouped by the user-mapped category column.",
         entities: "Accepted, de-duplicated rows grouped by the optional user-mapped entity column.",
-        durationSeconds: "Finite mapped durations from 0 through 86400 seconds are summed without rounding."
+        durationSeconds:
+          "Mapped durations are converted to seconds and summed, then rounded to the nearest millisecond. Durations that are unreadable or longer than 86400 seconds count as zero."
       }
     };
   }
