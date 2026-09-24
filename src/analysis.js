@@ -276,16 +276,6 @@ export class PersonalDataAccumulator {
       );
       return;
     }
-    if (!timestamp.zone) {
-      incrementWarning(
-        this.#warnings,
-        "missing-timezone",
-        "Timestamps without a zone were interpreted as UTC for validation while wall-date aggregation retained their written date and hour.",
-        reference
-      );
-    } else {
-      this.#offsets.add(timestamp.zone);
-    }
 
     const category = this.#value(row, "category");
     if (category === "") {
@@ -345,6 +335,19 @@ export class PersonalDataAccumulator {
     }
 
     this.#seenIds.add(duplicateKey);
+
+    // Zone bookkeeping only happens once the row is known to be accepted, so
+    // excluded rows cannot raise zone warnings on their own.
+    if (!timestamp.zone) {
+      incrementWarning(
+        this.#warnings,
+        "missing-timezone",
+        "Timestamps without a zone were interpreted as UTC for validation while wall-date aggregation retained their written date and hour.",
+        reference
+      );
+    } else {
+      this.#offsets.add(timestamp.zone);
+    }
 
     const date = timestamp.date;
     const hour = timestamp.hour;

@@ -210,3 +210,23 @@ test("a finalised result is a snapshot that later rows cannot change", () => {
   assert.deepEqual(before, beforeCopy);
   assert.equal(accumulator.finalise().dataset.acceptedRows, 2);
 });
+
+test("excluded rows do not raise time-zone warnings or add offsets", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "zones.csv" },
+    headers: ["timestamp", "category", "id"],
+    mapping: { timestamp: "timestamp", category: "category", recordId: "id" }
+  });
+  accumulator.ingest(["2025-01-01T08:00+10:00", "focus", "a"], 2);
+  accumulator.ingest(["2025-01-01T09:00+05:30", "", "b"], 3);
+  accumulator.ingest(["2025-01-01T10:00", "", "c"], 4);
+  accumulator.ingest(["2025-01-01T11:00-04:00", "focus", "a"], 5);
+  const result = accumulator.finalise();
+  assert.equal(result.dataset.acceptedRows, 1);
+  assert.equal(result.dataset.malformedRows, 2);
+  assert.equal(result.dataset.duplicateRows, 1);
+  assert.deepEqual(result.coverage.explicitOffsets, ["+10:00"]);
+  const codes = result.warnings.map((warning) => warning.code);
+  assert.ok(!codes.includes("missing-timezone"));
+  assert.ok(!codes.includes("timezone-offset-change"));
+});
