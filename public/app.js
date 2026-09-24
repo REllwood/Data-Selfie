@@ -41,6 +41,7 @@ const elements = {
   analyse: document.querySelector("#analyse-button"),
   status: document.querySelector("#operation-status"),
   progress: document.querySelector("#import-progress"),
+  progressDetail: document.querySelector("#progress-detail"),
   cancel: document.querySelector("#cancel-button"),
   coverage: document.querySelector("#coverage-summary"),
   warnings: document.querySelector("#warning-list"),
@@ -59,6 +60,8 @@ const elements = {
   downloadExport: document.querySelector("#download-export"),
   exportPreview: document.querySelector("#export-preview")
 };
+
+const downloadUrlLifetimeMs = 40_000;
 
 let selectedFile;
 let previewRows = [];
@@ -79,10 +82,13 @@ function setStatus(message, loading = false) {
   elements.status.textContent = loading ? `Loading: ${message}` : message;
 }
 
-function setProgress(bytes, total) {
+// Per-chunk detail goes here rather than to the status line, which is a live
+// region: announcing every chunk would flood screen readers.
+function setProgress(bytes, total, detail = "") {
   elements.progress.max = Math.max(total, 1);
   elements.progress.value = Math.min(bytes, total);
   elements.progress.textContent = `${Math.round((bytes / Math.max(total, 1)) * 100)}%`;
+  elements.progressDetail.textContent = detail;
 }
 
 function resetAnalysisPresentation() {
@@ -357,8 +363,11 @@ async function prepareFile(file) {
       for await (const row of parseCsvChunks(fileTextChunks(file, signal), {
         signal,
         onProgress: ({ bytes, rows: rowCount }) => {
-          setProgress(bytes, file.size);
-          setStatus(`Reading preview: ${rowCount} rows and ${bytes} bytes`, true);
+          setProgress(
+            bytes,
+            file.size,
+            `Preview: ${rowCount.toLocaleString("en-AU")} rows and ${bytes.toLocaleString("en-AU")} bytes read`
+          );
         }
       })) {
         rows.push(row);
@@ -556,10 +565,10 @@ elements.mappingForm.addEventListener("submit", async (event) => {
         signal,
         onProgress: ({ bytes, rows }) => {
           if (sourceRevision === activeSourceRevision && analysisJob === activeAnalysisJob) {
-            setProgress(bytes, sourceFile.size);
-            setStatus(
-              `Parsing ${sourceFile.name}: ${rows} records and ${bytes.toLocaleString("en-AU")} bytes`,
-              true
+            setProgress(
+              bytes,
+              sourceFile.size,
+              `${rows.toLocaleString("en-AU")} records and ${bytes.toLocaleString("en-AU")} bytes read`
             );
           }
         }
@@ -698,9 +707,13 @@ elements.downloadExport.addEventListener("click", async () => {
       const link = document.createElement("a");
       link.href = url;
       link.download = "data-selfie.portrait.html";
+      link.hidden = true;
+      document.body.append(link);
       link.click();
-      await nextPaint();
-      URL.revokeObjectURL(url);
+      link.remove();
+      // Browsers may read the blob after click() returns; revoking straight
+      // away can cancel the download.
+      setTimeout(() => URL.revokeObjectURL(url), downloadUrlLifetimeMs);
     });
     setStatus("Portrait download prepared locally. No data was uploaded.", false);
   } catch {

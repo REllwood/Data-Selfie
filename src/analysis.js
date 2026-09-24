@@ -257,6 +257,18 @@ function monthRange(firstMonth, lastMonth) {
   return result;
 }
 
+// Code-point order, so the result doesn't depend on the runtime's locale.
+function compareText(left, right) {
+  if (left < right) {
+    return -1;
+  }
+  return left > right ? 1 : 0;
+}
+
+function byCountThenKey(left, right) {
+  return right.count - left.count || compareText(left.key, right.key);
+}
+
 // Floating-point sums of fractional or millisecond durations drift (0.1 + 0.2);
 // totals are reported to the nearest millisecond.
 function roundToMilliseconds(seconds) {
@@ -265,7 +277,7 @@ function roundToMilliseconds(seconds) {
 
 function serialiseBuckets(map) {
   return [...map.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareText(left, right))
     .map(([key, bucket]) => ({
       key,
       count: bucket.count,
@@ -549,14 +561,10 @@ export class PersonalDataAccumulator {
       aggregates: {
         daily: serialiseBuckets(this.#daily),
         hourly: serialiseBuckets(hourlyMap),
-        categories: serialiseBuckets(this.#categories),
-        entities: serialiseBuckets(this.#entities).sort(
-          (left, right) => right.count - left.count || left.key.localeCompare(right.key)
-        )
+        categories: serialiseBuckets(this.#categories).sort(byCountThenKey),
+        entities: serialiseBuckets(this.#entities).sort(byCountThenKey)
       },
-      warnings: [...warnings.values()].sort((left, right) =>
-        left.code.localeCompare(right.code)
-      ),
+      warnings: [...warnings.values()].sort((left, right) => compareText(left.code, right.code)),
       definitions: {
         // These are copied into portraits, so they never name the time zone.
         ...(this.#zoneFormatter
