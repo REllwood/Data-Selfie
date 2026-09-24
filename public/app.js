@@ -9,6 +9,22 @@ const mappingDefinitions = [
   { field: "recordId", label: "Stable record identifier", required: false, aliases: ["event_id", "id", "record_id"] }
 ];
 
+const deviceTimeZone = (() => {
+  try {
+    return new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+})();
+
+function supportedTimeZones() {
+  try {
+    return Intl.supportedValuesOf("timeZone");
+  } catch {
+    return [];
+  }
+}
+
 const elements = {
   file: document.querySelector("#csv-file"),
   fixture: document.querySelector("#fixture-button"),
@@ -26,6 +42,7 @@ const elements = {
   aggregateBoundary: document.querySelector("#aggregate-boundary"),
   categories: document.querySelector("#category-bars"),
   hours: document.querySelector("#hour-bars"),
+  hourHeading: document.querySelector("#hour-heading"),
   daily: document.querySelector("#daily-bars"),
   entities: document.querySelector("#entity-bars"),
   definition: document.querySelector("#calculation-definition"),
@@ -80,6 +97,7 @@ function resetAnalysisPresentation() {
     );
   }
   elements.aggregateBoundary.textContent = "No aggregate tables yet.";
+  elements.hourHeading.textContent = "Hour of day";
   elements.definition.textContent =
     "Select an aggregate mark to inspect its definition and bounded source coverage.";
   elements.references.replaceChildren();
@@ -105,14 +123,14 @@ function invalidateAnalysisForMapping() {
   currentController?.abort("mapping-changed");
   analysis = undefined;
   invalidatePreparedPortrait(
-    "Column mapping changed. The previous analysis and portrait were discarded."
+    "Analysis settings changed. The previous analysis and portrait were discarded."
   );
   elements.exportSections.disabled = true;
   elements.prepareExport.disabled = true;
   elements.mappingFields.disabled = false;
   resetAnalysisPresentation();
   setStatus(
-    "Column mapping changed. Analyse the selected source again before preparing a portrait.",
+    "Analysis settings changed. Analyse the selected source again before preparing a portrait.",
     false
   );
 }
@@ -187,6 +205,41 @@ function currentMapping() {
   );
 }
 
+// An empty value means dates and hours are counted as written.
+function currentTimeZone() {
+  return elements.mappingControls.querySelector('[name="timeZone"]')?.value ?? "";
+}
+
+function appendOption(parent, value, text) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = text;
+  parent.append(option);
+  return option;
+}
+
+function renderTimeZoneControl() {
+  const wrapper = document.createElement("label");
+  wrapper.textContent = "Count dates and hours in";
+  const select = document.createElement("select");
+  select.name = "timeZone";
+  appendOption(select, deviceTimeZone, `${deviceTimeZone} (this device)`).selected = true;
+  appendOption(select, "", "Each timestamp's own time, as written");
+  if (deviceTimeZone !== "UTC") {
+    appendOption(select, "UTC", "UTC");
+  }
+  const allZones = document.createElement("optgroup");
+  allZones.label = "All time zones";
+  for (const zone of supportedTimeZones()) {
+    if (zone !== deviceTimeZone && zone !== "UTC") {
+      appendOption(allZones, zone, zone);
+    }
+  }
+  select.append(allZones);
+  wrapper.append(select);
+  return wrapper;
+}
+
 function renderMapping() {
   elements.mappingControls.replaceChildren(
     ...mappingDefinitions.map((definition) => {
@@ -207,7 +260,8 @@ function renderMapping() {
       }
       wrapper.append(select);
       return wrapper;
-    })
+    }),
+    renderTimeZoneControl()
   );
   elements.mappingFields.disabled = false;
 }
@@ -378,8 +432,13 @@ function renderAnalysis(result) {
   renderBars(elements.hours, "hourly", result.aggregates.hourly, { hideZeros: false });
   renderBars(elements.daily, "daily", result.aggregates.daily);
   renderBars(elements.entities, "entities", result.aggregates.entities);
+  const converted = result.coverage.timeBasis === "converted";
+  elements.hourHeading.textContent = converted
+    ? `Hour of day in ${result.coverage.reportingTimeZone}`
+    : "Hour written in source timestamp";
   elements.aggregateBoundary.textContent =
-    `${result.dataset.acceptedRows} accepted rows · ${result.coverage.firstWallDate ?? "no first date"} to ${result.coverage.lastWallDate ?? "no last date"} · descriptive evidence only`;
+    `${result.dataset.acceptedRows} accepted rows · ${result.coverage.firstWallDate ?? "no first date"} to ${result.coverage.lastWallDate ?? "no last date"} · ` +
+    `${converted ? `${result.coverage.reportingTimeZone} time` : "times as written"} · descriptive evidence only`;
   elements.exportSections.disabled = false;
   elements.prepareExport.disabled = false;
 }
@@ -429,6 +488,7 @@ elements.mappingForm.addEventListener("submit", async (event) => {
   const sourceFile = selectedFile;
   const sourceHeaders = [...headers];
   const sourceMapping = currentMapping();
+  const sourceTimeZone = currentTimeZone();
   let accumulator;
   let operationSignal;
   try {
@@ -441,7 +501,8 @@ elements.mappingForm.addEventListener("submit", async (event) => {
           lastModified: sourceFile.lastModified
         },
         headers: sourceHeaders,
-        mapping: sourceMapping
+        mapping: sourceMapping,
+        timeZone: sourceTimeZone || null
       });
       let headerSeen = false;
       for await (const row of parseCsvChunks(fileTextChunks(sourceFile, signal), {

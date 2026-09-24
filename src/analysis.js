@@ -9,6 +9,10 @@ const requiredMappingFields = Object.freeze(["timestamp", "category"]);
 const maxProvenanceRows = 24;
 const maxDistinctCategories = 2_000;
 const maxDistinctEntities = 10_000;
+// Converting outside these bounds could produce a year Intl renders with an
+// era or more than four digits.
+const earliestConvertibleTime = Date.parse("0001-01-02T00:00:00Z");
+const latestConvertibleTime = Date.parse("9999-12-30T23:59:59Z");
 
 export class AnalysisError extends Error {
   constructor(message, path, code = "INVALID_ANALYSIS_INPUT") {
@@ -151,6 +155,46 @@ export function parseWallTimestamp(value) {
   };
 }
 
+function createZoneFormatter(timeZone) {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      calendar: "gregory",
+      numberingSystem: "latn",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23"
+    });
+  } catch {
+    throw new AnalysisError(
+      `"${timeZone}" is not a recognised time zone`,
+      "timeZone",
+      "INVALID_TIME_ZONE"
+    );
+  }
+}
+
+function zonedWallTime(formatter, instant) {
+  const time = instant.getTime();
+  if (time < earliestConvertibleTime || time > latestConvertibleTime) {
+    throw new AnalysisError(
+      "Timestamp is outside the range that can be converted between time zones",
+      "rows.timestamp",
+      "INVALID_TIMESTAMP"
+    );
+  }
+  const parts = {};
+  for (const part of formatter.formatToParts(instant)) {
+    parts[part.type] = part.value;
+  }
+  return {
+    date: `${parts.year.padStart(4, "0")}-${parts.month}-${parts.day}`,
+    hour: Number(parts.hour)
+  };
+}
+
 function sourceReference(source, rowNumber, recordId) {
   return {
     file: source.name,
@@ -239,8 +283,12 @@ export class PersonalDataAccumulator {
   #malformedRows = 0;
   #minDate;
   #maxDate;
+  #timeZone = null;
+  #zoneFormatter;
 
-  constructor({ source, headers, mapping }) {
+  // timeZone is an IANA name such as "Australia/Melbourne". When it is omitted,
+  // dates and hours are counted exactly as written in each timestamp.
+  constructor({ source, headers, mapping, timeZone = null }) {
     if (!source || typeof source.name !== "string") {
       throw new AnalysisError("Source name is required", "source.name");
     }
@@ -253,6 +301,19 @@ export class PersonalDataAccumulator {
     };
     this.#headers = validated.headers;
     this.#mapping = validated.mapping;
+    if (timeZone !== null && timeZone !== undefined && timeZone !== "") {
+      this.#zoneFormatter = createZoneFormatter(String(timeZone));
+      this.#timeZone = this.#zoneFormatter.resolvedOptions().timeZone;
+    }
+  }
+
+  // Timestamps without a zone have no known instant, so they keep their
+  // written date and hour even when converting.
+  #wallTime(timestamp) {
+    if (!this.#zoneFormatter || !timestamp.zone) {
+      return { date: timestamp.date, hour: timestamp.hour };
+    }
+    return zonedWallTime(this.#zoneFormatter, timestamp.parsedTimestamp);
   }
 
   #value(row, field) {
@@ -281,8 +342,10 @@ export class PersonalDataAccumulator {
 
     const rawTimestamp = this.#value(row, "timestamp");
     let timestamp;
+    let wallTime;
     try {
       timestamp = parseWallTimestamp(rawTimestamp);
+      wallTime = this.#wallTime(timestamp);
     } catch {
       this.#malformedRows += 1;
       incrementWarning(
@@ -359,15 +422,14 @@ export class PersonalDataAccumulator {
       incrementWarning(
         this.#warnings,
         "missing-timezone",
-        "Timestamps without a zone were interpreted as UTC for validation while wall-date aggregation retained their written date and hour.",
+        "Timestamps without a time zone were counted at the date and hour written, because their exact moment is unknown.",
         reference
       );
     } else {
       this.#offsets.add(timestamp.zone);
     }
 
-    const date = timestamp.date;
-    const hour = timestamp.hour;
+    const { date, hour } = wallTime;
     const month = date.slice(0, 7);
     addToBucket(this.#daily, date, durationSeconds, reference);
     addToBucket(this.#hourly, String(hour).padStart(2, "0"), durationSeconds, reference);
@@ -393,7 +455,9 @@ export class PersonalDataAccumulator {
       incrementWarning(
         warnings,
         "timezone-offset-change",
-        `The source contains ${this.#offsets.size} explicit UTC offsets; wall-hour aggregates retain each timestamp's written hour.`
+        this.#zoneFormatter
+          ? `The source contains ${this.#offsets.size} different UTC offsets; all were converted to the chosen reporting time zone.`
+          : `The source contains ${this.#offsets.size} different UTC offsets; each timestamp was counted at the hour written, without converting between them.`
       );
     }
 
@@ -445,7 +509,9 @@ export class PersonalDataAccumulator {
         lastWallDate: this.#maxDate ?? null,
         presentMonths: [...presentMonths].sort(),
         missingMonths,
-        explicitOffsets: [...this.#offsets].sort()
+        explicitOffsets: [...this.#offsets].sort(),
+        timeBasis: this.#zoneFormatter ? "converted" : "as-written",
+        reportingTimeZone: this.#timeZone
       },
       aggregates: {
         daily: serialiseBuckets(this.#daily),
@@ -459,8 +525,18 @@ export class PersonalDataAccumulator {
         left.code.localeCompare(right.code)
       ),
       definitions: {
-        daily: "Accepted, de-duplicated rows grouped by the YYYY-MM-DD written in the source timestamp.",
-        hourly: "Accepted, de-duplicated rows grouped by the hour written in the source timestamp; offsets are not converted.",
+        // These are copied into portraits, so they never name the time zone.
+        ...(this.#zoneFormatter
+          ? {
+              daily:
+                "Accepted, de-duplicated rows grouped by calendar date in the chosen reporting time zone. Timestamps with an offset were converted; those without one were counted as written.",
+              hourly:
+                "Accepted, de-duplicated rows grouped by hour of day in the chosen reporting time zone. Timestamps with an offset were converted; those without one were counted as written."
+            }
+          : {
+              daily: "Accepted, de-duplicated rows grouped by the YYYY-MM-DD written in the source timestamp.",
+              hourly: "Accepted, de-duplicated rows grouped by the hour written in the source timestamp; offsets are not converted."
+            }),
         categories: "Accepted, de-duplicated rows grouped by the user-mapped category column.",
         entities: "Accepted, de-duplicated rows grouped by the optional user-mapped entity column.",
         durationSeconds: "Finite mapped durations from 0 through 86400 seconds are summed without rounding."
@@ -520,6 +596,7 @@ export function createPortrait(analysis, selection = {}) {
       rawEventsIncluded: false,
       sourceFilenameIncluded: false,
       recordIdentifiersIncluded: false,
+      reportingTimeZoneIncluded: false,
       categoryLabelsIncluded,
       entityLabelsIncluded: sections.entities,
       sourceLabelsMayContainContactOrLocationData:
@@ -535,7 +612,8 @@ export function createPortrait(analysis, selection = {}) {
       partial: analysis.dataset.partial,
       firstWallDate: analysis.coverage.firstWallDate,
       lastWallDate: analysis.coverage.lastWallDate,
-      missingMonths: clone(analysis.coverage.missingMonths)
+      missingMonths: clone(analysis.coverage.missingMonths),
+      timeBasis: analysis.coverage.timeBasis ?? "as-written"
     },
     aggregates,
     warnings: sections.warnings

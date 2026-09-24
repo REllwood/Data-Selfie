@@ -38,11 +38,15 @@ The first row must be a header with unique column names. You map columns to thes
 
 | Field | Required | Accepts |
 | --- | --- | --- |
-| Timestamp | Yes | ISO 8601 date and time, e.g. `2025-01-05T08:15:00+11:00`. A space instead of `T`, fractional seconds, and zones written as `Z`, `UTC`, `+10:00`, `+1000` or `+10` all work. Timestamps without a zone are kept as written and flagged. |
+| Timestamp | Yes | ISO 8601 date and time, e.g. `2025-01-05T08:15:00+11:00`. A space instead of `T`, fractional seconds, and zones written as `Z`, `UTC`, `+10:00`, `+1000` or `+10` all work. Timestamps without a zone can't be converted, so they keep their written date and hour and are flagged. |
 | Category | Yes | Any text, such as a listening context |
 | Entity | No | Any text, such as an artist |
 | Duration | No | Seconds |
 | Record ID | No | A stable identifier, used to detect duplicates |
+
+### Time zones
+
+By default, dates and hours are counted in your device's time zone. A timestamp with an offset is converted, so `2025-01-01T22:15:00Z` and `2025-01-02T09:15:00+11:00` both land at 9am on 2 January in Melbourne. You can pick another zone, or count each timestamp exactly as written. Exported portraits say which basis was used but never name the zone.
 
 ## Status
 
