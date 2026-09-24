@@ -30,7 +30,7 @@ cd Data-Selfie
 npm start
 ```
 
-Open http://127.0.0.1:4177, choose `examples/synthetic-listening.csv` or press **Use documented fixture**, check the mapping, then press **Analyse selected CSV**.
+Open http://127.0.0.1:4177 (set `PORT` or `HOST` to change where it listens), choose `examples/synthetic-listening.csv` or press **Use documented fixture**, check the mapping, then press **Analyse selected CSV**.
 
 ## Status
 
@@ -39,7 +39,7 @@ v0.1 works with a generic CSV and is tested against a synthetic year of music li
 ## Development
 
 ```sh
-npm test        # CSV parser and analysis tests
+npm test        # CSV parser, analysis and server tests
 npm run check   # tests plus syntax checks
 ```
 
