@@ -237,8 +237,16 @@ progress {
   accent-color: #a2472e;
   display: block;
   height: 0.7rem;
-  margin: 0.75rem 0;
+  margin: 0.75rem 0 0.35rem;
   width: 100%;
+}
+
+.progress-detail {
+  color: #58615b;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 0.75rem;
+  min-height: 1.2em;
 }
 
 .coverage-desk {
@@ -289,12 +297,21 @@ progress {
 .portrait-desk > header {
   align-items: start;
   display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
   justify-content: space-between;
-  gap: 1rem;
+}
+
+/* The heading keeps its natural width; the summary wraps below it when the
+   column is too narrow for both, instead of squeezing the heading. */
+.portrait-desk > header > div {
+  flex: none;
 }
 
 .portrait-desk > header > p {
   color: #58615b;
+  flex: 1 1 18rem;
+  margin-left: auto;
   max-width: 27rem;
   text-align: right;
 }
@@ -428,6 +445,7 @@ progress {
   }
 
   .portrait-desk > header > p {
+    margin-left: 0;
     text-align: left;
   }
 }

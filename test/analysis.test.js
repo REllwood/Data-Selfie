@@ -431,3 +431,24 @@ test("provenance keeps both the record number and its starting line", () => {
     [[3, 5], [4, 4]]
   );
 });
+
+test("categories are ordered by count, then by code point rather than locale", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "order.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" }
+  });
+  ["b", "B", "a", "Ä", "a"].forEach((category, index) =>
+    accumulator.ingest([`2025-01-0${index + 1}T08:00Z`, category], index + 2)
+  );
+  const result = accumulator.finalise();
+  assert.deepEqual(result.aggregates.categories.map((bucket) => bucket.key), ["a", "B", "b", "Ä"]);
+  assert.deepEqual(
+    result.aggregates.daily.map((bucket) => bucket.key),
+    ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04", "2025-01-05"]
+  );
+  assert.deepEqual(
+    createPortrait(result).aggregates.categories.map((bucket) => [bucket.key, bucket.count]),
+    [["Category 1", 2], ["Category 2", 1], ["Category 3", 1], ["Category 4", 1]]
+  );
+});

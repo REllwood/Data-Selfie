@@ -47,7 +47,8 @@
 
         <div class="progress-region">
           <div id="operation-status" class="operation-status" role="status" aria-live="polite">Ready for a local file.</div>
-          <progress id="import-progress" max="1" value="0">0%</progress>
+          <progress id="import-progress" max="1" value="0" aria-label="Import progress">0%</progress>
+          <p id="progress-detail" class="progress-detail"></p>
           <button id="cancel-button" class="secondary" type="button" disabled>Cancel current operation</button>
         </div>
       </section>
