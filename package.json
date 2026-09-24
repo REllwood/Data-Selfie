@@ -19,6 +19,8 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
+    "test:browser": "node --test test/browser.test.js",
+    "lint": "npx --yes eslint@10.11.0 .",
     "check:syntax": "node --check src/csv.js && node --check src/analysis.js && node --check src/static-server.js && node --check src/server.js && node --check public/app.js",
     "check": "npm test && npm run check:syntax"
   }

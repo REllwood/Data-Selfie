@@ -55,9 +55,20 @@ v0.1 works with a generic CSV and is tested against a synthetic year of music li
 ## Development
 
 ```sh
-npm test        # CSV parser, analysis and server tests
-npm run check   # tests plus syntax checks
+npm test              # parser, analysis, server and browser tests
+npm run test:browser  # browser tests only
+npm run lint          # ESLint, fetched on demand through npx
+npm run check         # tests plus syntax checks
 ```
+
+The browser tests drive the app in headless Chromium through [Playwright](https://playwright.dev), which isn't a project dependency. Without it they're skipped. To run them:
+
+```sh
+npm install --no-save playwright
+npx playwright install chromium
+```
+
+CI runs the tests and lint on Node 22 and 24, plus the browser tests, for every pull request.
 
 ## License
 

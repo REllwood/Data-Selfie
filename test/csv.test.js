@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectCsvRows, parseCsvChunks } from "../src/csv.js";
+import { collectCsvRows } from "../src/csv.js";
 
 async function* chunks(values) {
   for (const value of values) {
@@ -33,13 +33,10 @@ test("UTF-8 byte chunks may split a multi-byte character", async () => {
 
 test("row, column, field and byte limits are enforced", async () => {
   await assert.rejects(
-    async () => {
-      for await (const _row of parseCsvChunks(chunks(["a,b,c\n1,2,3\n"]), {
+    () =>
+      collectCsvRows(chunks(["a,b,c\n1,2,3\n"]), {
         limits: { maxColumns: 2 }
-      })) {
-        // Consume the bounded stream.
-      }
-    },
+      }),
     (error) => error.code === "TOO_MANY_COLUMNS"
   );
   await assert.rejects(
