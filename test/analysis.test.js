@@ -230,3 +230,57 @@ test("excluded rows do not raise time-zone warnings or add offsets", () => {
   assert.ok(!codes.includes("missing-timezone"));
   assert.ok(!codes.includes("timezone-offset-change"));
 });
+
+test("timestamps accept common ISO 8601 and export variants", () => {
+  const accepted = [
+    ["2025-01-01 12:00Z", "2025-01-01", 12, "Z", "2025-01-01T12:00:00.000Z"],
+    ["2025-01-01T12:00:00.123+1000", "2025-01-01", 12, "+10:00", "2025-01-01T02:00:00.123Z"],
+    ["2025-01-01T12:00:00+10", "2025-01-01", 12, "+10:00", "2025-01-01T02:00:00.000Z"],
+    ["2025-01-01T12:00:00.123456Z", "2025-01-01", 12, "Z", "2025-01-01T12:00:00.123Z"],
+    ["2025-01-01t12:00:00z", "2025-01-01", 12, "Z", "2025-01-01T12:00:00.000Z"],
+    ["2025-01-01 12:00:00 UTC", "2025-01-01", 12, "Z", "2025-01-01T12:00:00.000Z"],
+    ["2025-01-01T12:00:00+00:00", "2025-01-01", 12, "Z", "2025-01-01T12:00:00.000Z"],
+    ["2025-01-01T12:00:00,5-04:30", "2025-01-01", 12, "-04:30", "2025-01-01T16:30:00.500Z"],
+    ["2025-01-01T12:00:00 +05:45", "2025-01-01", 12, "+05:45", "2025-01-01T06:15:00.000Z"],
+    ["2025-01-01T23:30", "2025-01-01", 23, null, "2025-01-01T23:30:00.000Z"]
+  ];
+  for (const [input, date, hour, zone, instant] of accepted) {
+    const parsed = parseWallTimestamp(input);
+    assert.equal(parsed.date, date, input);
+    assert.equal(parsed.hour, hour, input);
+    assert.equal(parsed.zone, zone, input);
+    assert.equal(parsed.parsedTimestamp.toISOString(), instant, input);
+  }
+  assert.equal(parseWallTimestamp("0099-03-01T00:00Z").parsedTimestamp.getUTCFullYear(), 99);
+});
+
+test("timestamps reject malformed text and impossible values", () => {
+  for (const input of [
+    "2025-1-1T12:00Z",
+    "2025-01-01T12Z",
+    "12:00 2025-01-01",
+    "2025-01-01T12:00:00.1234567890Z",
+    "2025-01-01T12:00:00+10:00 extra",
+    "2025-01-01T12:00:00 AEST",
+    ""
+  ]) {
+    assert.throws(() => parseWallTimestamp(input), (error) => error.code === "INVALID_TIMESTAMP", input);
+  }
+  for (const input of ["2025-01-01T12:00:60Z", "2025-01-01T12:00+2400", "2025-01-01T12:00+10:60"]) {
+    assert.throws(() => parseWallTimestamp(input), /impossible/, input);
+  }
+});
+
+test("equivalent offsets written differently count as one offset", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "offset-styles.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" }
+  });
+  accumulator.ingest(["2025-01-01T08:00+10:00", "focus"], 2);
+  accumulator.ingest(["2025-01-02T08:00+1000", "focus"], 3);
+  accumulator.ingest(["2025-01-03T08:00+10", "focus"], 4);
+  const result = accumulator.finalise();
+  assert.deepEqual(result.coverage.explicitOffsets, ["+10:00"]);
+  assert.ok(!result.warnings.some((warning) => warning.code === "timezone-offset-change"));
+});
