@@ -78,6 +78,14 @@ function nextPaint() {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+// Long parses hand control back to the browser this often, so it can paint
+// progress and handle input such as the Cancel button.
+const workSliceMs = 40;
+
+function yieldToBrowser() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function setStatus(message, loading = false) {
   elements.status.dataset.loading = String(loading);
   elements.status.textContent = loading ? `Loading: ${message}` : message;
@@ -534,6 +542,10 @@ elements.mappingForm.addEventListener("submit", async (event) => {
     return;
   }
   elements.mappingFields.disabled = true;
+  // Preparing a portrait starts another operation, which would cancel this
+  // one, so export controls wait until the analysis settles.
+  elements.exportSections.disabled = true;
+  elements.prepareExport.disabled = true;
   preparedPortraitHtml = "";
   activePortraitRevision += 1;
   elements.exportPreview.value = "";
@@ -562,6 +574,7 @@ elements.mappingForm.addEventListener("submit", async (event) => {
         durationUnit: sourceDurationUnit
       });
       let headerSeen = false;
+      let sliceStart = performance.now();
       for await (const row of parseCsvChunks(fileTextChunks(sourceFile, signal), {
         signal,
         onProgress: ({ bytes, rows }) => {
@@ -582,6 +595,10 @@ elements.mappingForm.addEventListener("submit", async (event) => {
           continue;
         }
         accumulator.ingest(row.values, row.rowNumber, row.line);
+        if (performance.now() - sliceStart > workSliceMs) {
+          await yieldToBrowser();
+          sliceStart = performance.now();
+        }
       }
       if (sourceRevision !== activeSourceRevision || analysisJob !== activeAnalysisJob) {
         throw new DOMException("Analysis superseded", "AbortError");
@@ -615,6 +632,8 @@ elements.mappingForm.addEventListener("submit", async (event) => {
   } finally {
     if (sourceRevision === activeSourceRevision && analysisJob === activeAnalysisJob) {
       elements.mappingFields.disabled = false;
+      elements.exportSections.disabled = analysis === undefined;
+      elements.prepareExport.disabled = analysis === undefined;
     }
   }
 });
