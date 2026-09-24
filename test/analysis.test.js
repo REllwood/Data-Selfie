@@ -416,3 +416,18 @@ test("summed durations are reported to the nearest millisecond", () => {
 test("an unknown duration unit is rejected", () => {
   assert.throws(() => durationAccumulator("minutes"), (error) => error.code === "INVALID_DURATION_UNIT");
 });
+
+test("provenance keeps both the record number and its starting line", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "lines.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" }
+  });
+  accumulator.ingest(["2025-01-01T08:00Z", "focus"], 3, 5);
+  accumulator.ingest(["2025-01-02T08:00Z", "focus"], 4);
+  const sources = accumulator.finalise().aggregates.categories[0].provenance.sources;
+  assert.deepEqual(
+    sources.map((source) => [source.row, source.line]),
+    [[3, 5], [4, 4]]
+  );
+});

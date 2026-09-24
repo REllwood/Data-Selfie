@@ -5,13 +5,17 @@ export const csvLimits = Object.freeze({
   maxFieldCharacters: 32_768
 });
 
+// row counts CSV records (as a spreadsheet shows them); line counts physical
+// lines (as a text editor shows them). They differ once a quoted field spans
+// lines.
 export class CsvError extends Error {
-  constructor(message, { code = "INVALID_CSV", row = 1, column = 1 } = {}) {
+  constructor(message, { code = "INVALID_CSV", row = 1, column = 1, line = row } = {}) {
     super(message);
     this.name = "CsvError";
     this.code = code;
     this.row = row;
     this.column = column;
+    this.line = line;
   }
 }
 
@@ -60,13 +64,19 @@ export async function* parseCsvChunks(chunks, options = {}) {
   let inQuotes = false;
   let quotePending = false;
   let skipLineFeed = false;
+  // Physical lines: CR, LF and CRLF each end one line, inside quotes too.
+  let nextLine = 1;
+  let characterLine = 1;
+  let rowStartLine = 1;
+  let quoteStartLine = 1;
+  let previousWasCarriageReturn = false;
 
   function append(character) {
     field += character;
     if (field.length > limits.maxFieldCharacters) {
       throw new CsvError(
         `Field exceeds ${limits.maxFieldCharacters} characters`,
-        { code: "FIELD_TOO_LARGE", row: rowNumber + 1, column: row.length + 1 }
+        { code: "FIELD_TOO_LARGE", row: rowNumber + 1, column: row.length + 1, line: characterLine }
       );
     }
   }
@@ -77,7 +87,7 @@ export async function* parseCsvChunks(chunks, options = {}) {
     if (row.length > limits.maxColumns) {
       throw new CsvError(
         `Row exceeds ${limits.maxColumns} columns`,
-        { code: "TOO_MANY_COLUMNS", row: rowNumber + 1, column: row.length }
+        { code: "TOO_MANY_COLUMNS", row: rowNumber + 1, column: row.length, line: characterLine }
       );
     }
   }
@@ -88,12 +98,13 @@ export async function* parseCsvChunks(chunks, options = {}) {
     if (rowNumber > limits.maxRows) {
       throw new CsvError(
         `CSV exceeds ${limits.maxRows} rows`,
-        { code: "TOO_MANY_ROWS", row: rowNumber, column: 1 }
+        { code: "TOO_MANY_ROWS", row: rowNumber, column: 1, line: rowStartLine }
       );
     }
-    const finished = row;
+    const finished = { rowNumber, line: rowStartLine, values: row };
     row = [];
-    return { rowNumber, values: finished };
+    rowStartLine = nextLine;
+    return finished;
   }
 
   for await (const chunk of normaliseTextChunks(chunks)) {
@@ -102,13 +113,18 @@ export async function* parseCsvChunks(chunks, options = {}) {
     if (totalBytes > limits.maxBytes) {
       throw new CsvError(
         `CSV exceeds ${limits.maxBytes} bytes`,
-        { code: "FILE_TOO_LARGE", row: rowNumber + 1, column: row.length + 1 }
+        { code: "FILE_TOO_LARGE", row: rowNumber + 1, column: row.length + 1, line: nextLine }
       );
     }
 
     for (let index = 0; index < chunk.length; index += 1) {
       throwIfAborted(options.signal);
       const character = chunk[index];
+      characterLine = nextLine;
+      if (character === "\r" || (character === "\n" && !previousWasCarriageReturn)) {
+        nextLine += 1;
+      }
+      previousWasCarriageReturn = character === "\r";
 
       if (skipLineFeed) {
         skipLineFeed = false;
@@ -142,7 +158,7 @@ export async function* parseCsvChunks(chunks, options = {}) {
           }
           throw new CsvError(
             "Unexpected character after a closing quote",
-            { row: rowNumber + 1, column: row.length + 1 }
+            { row: rowNumber + 1, column: row.length + 1, line: characterLine }
           );
         }
         if (character === '"') {
@@ -157,10 +173,11 @@ export async function* parseCsvChunks(chunks, options = {}) {
         if (field !== "") {
           throw new CsvError(
             "A quoted field must begin at the start of a column",
-            { row: rowNumber + 1, column: row.length + 1 }
+            { row: rowNumber + 1, column: row.length + 1, line: characterLine }
           );
         }
         inQuotes = true;
+        quoteStartLine = characterLine;
       } else if (character === ",") {
         finishField();
       } else if (character === "\n" || character === "\r") {
@@ -179,7 +196,7 @@ export async function* parseCsvChunks(chunks, options = {}) {
   if (inQuotes && !quotePending) {
     throw new CsvError(
       "CSV ended inside a quoted field",
-      { code: "UNTERMINATED_QUOTE", row: rowNumber + 1, column: row.length + 1 }
+      { code: "UNTERMINATED_QUOTE", row: rowNumber + 1, column: row.length + 1, line: quoteStartLine }
     );
   }
   if (field !== "" || row.length > 0) {
