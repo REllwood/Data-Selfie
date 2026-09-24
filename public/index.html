@@ -108,7 +108,7 @@
           <p class="section-number">05 / Selective portrait</p>
           <h2 id="export-heading">Prepare a privacy-safe page</h2>
         </div>
-        <p>Raw events, source filenames and record identifiers never enter the portrait. Original category and entity labels remain excluded unless selected explicitly because either may contain personal information.</p>
+        <p>Raw events, source filenames, record identifiers, exact first and last dates and your time zone never enter the portrait. Any day, hour, category or entity with fewer rows than the minimum below is withheld, so single events can't be picked out. Original category and entity labels remain excluded unless selected explicitly because either may contain personal information.</p>
         <label for="portrait-title">Portrait title</label>
         <input id="portrait-title" type="text" maxlength="120" value="My local listening portrait">
         <label for="portrait-note">My observation</label>
@@ -122,6 +122,14 @@
           <label class="sensitive-choice"><input type="checkbox" name="categoryLabels"> Original category labels, replaced with neutral labels by default</label>
           <label><input type="checkbox" name="warnings" checked> Coverage warnings</label>
           <label class="sensitive-choice"><input type="checkbox" name="entities"> Entity labels, excluded by default</label>
+          <label class="minimum-count">Hide buckets with fewer than
+            <select id="minimum-bucket-count" name="minimumBucketCount">
+              <option value="3">3 rows</option>
+              <option value="5" selected>5 rows</option>
+              <option value="10">10 rows</option>
+              <option value="20">20 rows</option>
+            </select>
+          </label>
         </fieldset>
 
         <div class="button-row">

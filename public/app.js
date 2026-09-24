@@ -56,6 +56,7 @@ const elements = {
   title: document.querySelector("#portrait-title"),
   note: document.querySelector("#portrait-note"),
   exportSections: document.querySelector("#export-sections"),
+  minimumBucketCount: document.querySelector("#minimum-bucket-count"),
   prepareExport: document.querySelector("#prepare-export"),
   downloadExport: document.querySelector("#download-export"),
   exportPreview: document.querySelector("#export-preview")
@@ -640,6 +641,7 @@ elements.prepareExport.addEventListener("click", async () => {
   const portraitRevision = activePortraitRevision;
   const portraitOptions = {
     ...selectedExportSections(),
+    minimumBucketCount: Number(elements.minimumBucketCount.value),
     title: elements.title.value,
     note: elements.note.value
   };
@@ -662,6 +664,7 @@ elements.prepareExport.addEventListener("click", async () => {
           privacy: portrait.privacy,
           coverage: portrait.coverage,
           includedTables: Object.keys(portrait.aggregates),
+          disclosureControl: portrait.disclosureControl,
           warningCount: portrait.warnings.length,
           boundary: portrait.boundary
         },

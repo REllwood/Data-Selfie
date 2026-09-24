@@ -18,7 +18,7 @@ Most apps will hand over your data as a CSV export, and most people never open i
 - Builds daily, hourly and category views
 - Catches malformed rows, duplicates, missing months and time zone changes
 - Links every mark on a chart back to its source rows
-- Exports a shareable portrait with only the aggregates and notes you choose. Raw events, identifiers and file names stay out by default.
+- Exports a shareable portrait with only the aggregates and notes you choose. Raw events, identifiers, file names, exact first and last dates and your time zone never enter it, and any day, hour or category with fewer than 5 events (you can raise this) is withheld so single events can't be picked out.
 
 ## Quick start
 

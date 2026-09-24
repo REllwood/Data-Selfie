@@ -402,6 +402,16 @@ progress {
   color: #7c3522;
 }
 
+.export-desk fieldset .minimum-count {
+  display: block;
+}
+
+.minimum-count select {
+  display: inline-block;
+  margin-left: 0.4rem;
+  width: auto;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;

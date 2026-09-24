@@ -117,7 +117,7 @@ test("default portrait export excludes raw and identifying source material", () 
 });
 
 test("entity labels enter a portrait only through explicit selection", () => {
-  const portrait = createPortrait(analyse(), { entities: true });
+  const portrait = createPortrait(analyse(), { entities: true, minimumBucketCount: 3 });
   assert.equal(portrait.privacy.entityLabelsIncluded, true);
   assert.match(JSON.stringify(portrait), /Aria North/);
 });
@@ -155,11 +155,13 @@ test("category labels require explicit inclusion and are disclosed conservativel
     mapping: { timestamp: "timestamp", category: "category" }
   });
   accumulator.ingest(["2026-01-01T12:00Z", "person@example.test"], 2);
+  accumulator.ingest(["2026-01-02T12:00Z", "person@example.test"], 3);
   const result = accumulator.finalise();
-  const defaultPortrait = createPortrait(result);
+  const defaultPortrait = createPortrait(result, { minimumBucketCount: 2 });
+  assert.equal(defaultPortrait.aggregates.categories.length, 1);
   assert.doesNotMatch(JSON.stringify(defaultPortrait), /person@example\.test/);
   assert.equal(defaultPortrait.privacy.sourceLabelsMayContainContactOrLocationData, false);
-  const labelledPortrait = createPortrait(result, { categoryLabels: true });
+  const labelledPortrait = createPortrait(result, { categoryLabels: true, minimumBucketCount: 2 });
   assert.match(JSON.stringify(labelledPortrait), /person@example\.test/);
   assert.equal(labelledPortrait.privacy.sourceLabelsMayContainContactOrLocationData, true);
 });
@@ -438,17 +440,82 @@ test("categories are ordered by count, then by code point rather than locale", (
     headers: ["timestamp", "category"],
     mapping: { timestamp: "timestamp", category: "category" }
   });
-  ["b", "B", "a", "Ä", "a"].forEach((category, index) =>
+  ["b", "B", "a", "Ä", "a", "b", "B", "Ä", "a"].forEach((category, index) =>
     accumulator.ingest([`2025-01-0${index + 1}T08:00Z`, category], index + 2)
   );
   const result = accumulator.finalise();
   assert.deepEqual(result.aggregates.categories.map((bucket) => bucket.key), ["a", "B", "b", "Ä"]);
   assert.deepEqual(
     result.aggregates.daily.map((bucket) => bucket.key),
-    ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04", "2025-01-05"]
+    Array.from({ length: 9 }, (_, index) => `2025-01-0${index + 1}`)
   );
   assert.deepEqual(
-    createPortrait(result).aggregates.categories.map((bucket) => [bucket.key, bucket.count]),
-    [["Category 1", 2], ["Category 2", 1], ["Category 3", 1], ["Category 4", 1]]
+    createPortrait(result, { minimumBucketCount: 2 }).aggregates.categories.map((bucket) => [
+      bucket.key,
+      bucket.count
+    ]),
+    [["Category 1", 3], ["Category 2", 2], ["Category 3", 2], ["Category 4", 2]]
   );
+});
+
+test("the default portrait withholds buckets with fewer than five rows", () => {
+  const portrait = createPortrait(analyse());
+  assert.equal(portrait.version, 2);
+  assert.equal(portrait.privacy.minimumBucketCount, 5);
+  assert.equal(portrait.disclosureControl.minimumBucketCount, 5);
+  // Every fixture day and hour holds a single event, and no category reaches five.
+  assert.deepEqual(portrait.aggregates.daily, []);
+  assert.deepEqual(portrait.aggregates.hourly, []);
+  assert.deepEqual(portrait.aggregates.categories, []);
+  assert.deepEqual(portrait.disclosureControl.withheld.daily, { buckets: 11, rows: 11 });
+  assert.deepEqual(portrait.disclosureControl.withheld.categories, { buckets: 4, rows: 11 });
+  assert.equal(portrait.disclosureControl.withheld.entities, undefined);
+  const serialised = JSON.stringify(portrait);
+  assert.doesNotMatch(serialised, /2025-\d\d-\d\d/);
+  assert.equal(portrait.coverage.firstMonth, "2025-01");
+  assert.equal(portrait.coverage.lastMonth, "2025-12");
+  assert.equal(portrait.coverage.firstWallDate, undefined);
+  assert.equal(portrait.privacy.exactFirstAndLastDatesIncluded, false);
+  const html = createPortraitHtml(portrait);
+  assert.match(html, /11 buckets with fewer than 5 rows \(11 rows in total\) are not shown/);
+  assert.doesNotMatch(html, /2025-\d\d-\d\d/);
+});
+
+test("buckets at or above the threshold are exported and empty ones are omitted", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "threshold.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" }
+  });
+  for (let day = 1; day <= 6; day += 1) {
+    accumulator.ingest([`2025-01-0${day}T08:00Z`, "focus"], day + 1);
+  }
+  accumulator.ingest(["2025-01-07T21:00Z", "evening"], 8);
+  const portrait = createPortrait(accumulator.finalise(), { minimumBucketCount: 3 });
+  assert.deepEqual(portrait.aggregates.hourly, [{ key: "08", count: 6, durationSeconds: 0 }]);
+  assert.deepEqual(portrait.disclosureControl.withheld.hourly, { buckets: 1, rows: 1 });
+  assert.deepEqual(portrait.aggregates.categories, [{ key: "Category 1", count: 6, durationSeconds: 0 }]);
+  assert.deepEqual(portrait.aggregates.daily, []);
+  assert.deepEqual(portrait.disclosureControl.withheld.daily, { buckets: 7, rows: 7 });
+});
+
+test("the minimum bucket count must be a whole number from 2 to 1000", () => {
+  const analysis = analyse();
+  for (const minimumBucketCount of [1, 0, 2.5, "abc", 1_001, -3]) {
+    assert.throws(
+      () => createPortrait(analysis, { minimumBucketCount }),
+      (error) => error.code === "INVALID_MINIMUM_COUNT",
+      String(minimumBucketCount)
+    );
+  }
+  assert.equal(createPortrait(analysis, { minimumBucketCount: "10" }).disclosureControl.minimumBucketCount, 10);
+});
+
+test("portrait HTML escapes every field, including numbers", () => {
+  const portrait = createPortrait(analyse(), { minimumBucketCount: 2 });
+  portrait.aggregates.categories = [{ key: "<b>k</b>", count: "<i>1</i>", durationSeconds: "<u>2</u>" }];
+  portrait.warnings = [{ code: "x", message: "y", count: "<script>alert(1)</script>" }];
+  const html = createPortraitHtml(portrait);
+  assert.doesNotMatch(html, /<script>|<b>k|<i>1|<u>2/);
+  assert.match(html, /&lt;script&gt;/);
 });
