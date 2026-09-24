@@ -364,9 +364,14 @@ export class PersonalDataAccumulator {
   }
 
   finalise({ partial = false, cancelled = false } = {}) {
+    // Work on a copy so repeated calls, or rows ingested later, cannot change
+    // a result that has already been returned.
+    const warnings = new Map(
+      [...this.#warnings].map(([code, warning]) => [code, clone(warning)])
+    );
     if (this.#offsets.size > 1) {
       incrementWarning(
-        this.#warnings,
+        warnings,
         "timezone-offset-change",
         `The source contains ${this.#offsets.size} explicit UTC offsets; wall-hour aggregates retain each timestamp's written hour.`
       );
@@ -380,7 +385,7 @@ export class PersonalDataAccumulator {
           )
         : [];
     if (missingMonths.length > 0) {
-      this.#warnings.set("missing-period", {
+      warnings.set("missing-period", {
         code: "missing-period",
         message: `No accepted rows were present for ${missingMonths.join(", ")}.`,
         count: missingMonths.length,
@@ -388,7 +393,7 @@ export class PersonalDataAccumulator {
       });
     }
     if (partial) {
-      this.#warnings.set("partial-import", {
+      warnings.set("partial-import", {
         code: "partial-import",
         message: cancelled
           ? "Import was cancelled; aggregates cover only rows processed before cancellation."
@@ -430,7 +435,7 @@ export class PersonalDataAccumulator {
           (left, right) => right.count - left.count || left.key.localeCompare(right.key)
         )
       },
-      warnings: [...this.#warnings.values()].sort((left, right) =>
+      warnings: [...warnings.values()].sort((left, right) =>
         left.code.localeCompare(right.code)
       ),
       definitions: {

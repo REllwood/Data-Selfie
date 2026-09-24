@@ -174,3 +174,39 @@ test("portrait text overflow is rejected rather than silently truncated", () => 
     (error) => error.code === "PORTRAIT_TEXT_LIMIT"
   );
 });
+
+test("finalise can be called repeatedly without changing earlier or later results", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "offsets.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" }
+  });
+  accumulator.ingest(["2025-01-01T08:00+10:00", "focus"], 2);
+  accumulator.ingest(["2025-03-01T08:00+11:00", "focus"], 3);
+  const first = accumulator.finalise();
+  const second = accumulator.finalise();
+  assert.deepEqual(second, first);
+  assert.equal(
+    first.warnings.find((warning) => warning.code === "timezone-offset-change").count,
+    1
+  );
+
+  const partial = accumulator.finalise({ partial: true, cancelled: true });
+  assert.ok(partial.warnings.some((warning) => warning.code === "partial-import"));
+  assert.deepEqual(accumulator.finalise(), first);
+});
+
+test("a finalised result is a snapshot that later rows cannot change", () => {
+  const accumulator = new PersonalDataAccumulator({
+    source: { name: "snapshot.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" }
+  });
+  accumulator.ingest(["2025-01-01T08:00", "focus"], 2);
+  const before = accumulator.finalise();
+  const beforeCopy = structuredClone(before);
+  accumulator.ingest(["2025-01-02T08:00", "focus"], 3);
+  accumulator.ingest(["not-a-time", "focus"], 4);
+  assert.deepEqual(before, beforeCopy);
+  assert.equal(accumulator.finalise().dataset.acceptedRows, 2);
+});
