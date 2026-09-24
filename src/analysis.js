@@ -598,12 +598,50 @@ function portraitText(value, path, maximum, { required = false } = {}) {
   return text;
 }
 
-function exportAggregate(items, { includeLabels = true, prefix = "Bucket" } = {}) {
-  return items.map((item, index) => ({
-    key: includeLabels ? item.key : `${prefix} ${index + 1}`,
-    count: item.count,
-    durationSeconds: item.durationSeconds
-  }));
+export const defaultMinimumBucketCount = 5;
+const minimumBucketCountRange = Object.freeze({ lowest: 2, highest: 1_000 });
+
+function portraitMinimumBucketCount(value) {
+  if (value === undefined || value === null || value === "") {
+    return defaultMinimumBucketCount;
+  }
+  const count = Number(value);
+  if (
+    !Number.isInteger(count) ||
+    count < minimumBucketCountRange.lowest ||
+    count > minimumBucketCountRange.highest
+  ) {
+    throw new AnalysisError(
+      `selection.minimumBucketCount must be a whole number from ${minimumBucketCountRange.lowest} to ${minimumBucketCountRange.highest}`,
+      "selection.minimumBucketCount",
+      "INVALID_MINIMUM_COUNT"
+    );
+  }
+  return count;
+}
+
+// Only buckets with at least minimumCount rows are exported. Empty buckets are
+// dropped too, so an absent key can't be read as "withheld, therefore some
+// activity". Neutral labels are numbered after suppression, leaving no gaps.
+function exportAggregate(items, { includeLabels, prefix, minimumCount }) {
+  const shown = [];
+  const withheld = { buckets: 0, rows: 0 };
+  for (const item of items) {
+    if (item.count >= minimumCount) {
+      shown.push(item);
+    } else if (item.count > 0) {
+      withheld.buckets += 1;
+      withheld.rows += item.count;
+    }
+  }
+  return {
+    buckets: shown.map((item, index) => ({
+      key: includeLabels ? item.key : `${prefix} ${index + 1}`,
+      count: item.count,
+      durationSeconds: item.durationSeconds
+    })),
+    withheld
+  };
 }
 
 export function createPortrait(analysis, selection = {}) {
@@ -618,18 +656,23 @@ export function createPortrait(analysis, selection = {}) {
     entities: selection.entities === true
   };
   const categoryLabelsIncluded = sections.categories && selection.categoryLabels === true;
+  const minimumBucketCount = portraitMinimumBucketCount(selection.minimumBucketCount);
   const aggregates = {};
+  const withheld = {};
   for (const name of ["daily", "hourly", "categories", "entities"]) {
     if (sections[name]) {
-      aggregates[name] = exportAggregate(analysis.aggregates[name], {
+      const exported = exportAggregate(analysis.aggregates[name], {
         includeLabels: name !== "categories" || categoryLabelsIncluded,
-        prefix: "Category"
+        prefix: "Category",
+        minimumCount: minimumBucketCount
       });
+      aggregates[name] = exported.buckets;
+      withheld[name] = exported.withheld;
     }
   }
   return {
     format: "data-selfie.local-portrait",
-    version: 1,
+    version: 2,
     title: portraitText(selection.title || "My local data portrait", "selection.title", 120, {
       required: true
     }),
@@ -643,7 +686,9 @@ export function createPortrait(analysis, selection = {}) {
       entityLabelsIncluded: sections.entities,
       sourceLabelsMayContainContactOrLocationData:
         categoryLabelsIncluded || sections.entities,
-      userAuthoredTextIncluded: true
+      userAuthoredTextIncluded: true,
+      minimumBucketCount,
+      exactFirstAndLastDatesIncluded: false
     },
     coverage: {
       source: "Local CSV source",
@@ -652,12 +697,18 @@ export function createPortrait(analysis, selection = {}) {
       duplicateRows: analysis.dataset.duplicateRows,
       malformedRows: analysis.dataset.malformedRows,
       partial: analysis.dataset.partial,
-      firstWallDate: analysis.coverage.firstWallDate,
-      lastWallDate: analysis.coverage.lastWallDate,
+      // Months, not days: exact first and last dates would pin down single events.
+      firstMonth: analysis.coverage.firstWallDate?.slice(0, 7) ?? null,
+      lastMonth: analysis.coverage.lastWallDate?.slice(0, 7) ?? null,
       missingMonths: clone(analysis.coverage.missingMonths),
       timeBasis: analysis.coverage.timeBasis ?? "as-written"
     },
     aggregates,
+    disclosureControl: {
+      minimumBucketCount,
+      rule: `Buckets with fewer than ${minimumBucketCount} rows are withheld, and empty buckets are omitted.`,
+      withheld
+    },
     warnings: sections.warnings
       ? analysis.warnings.map(({ code, message, count }) => ({ code, message, count }))
       : [],
@@ -680,40 +731,51 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function aggregateTable(title, items) {
+function aggregateTable(title, items, withheld, minimumBucketCount) {
   if (!items) {
     return "";
   }
   const rows = items
     .map(
       (item) =>
-        `<tr><th scope="row">${escapeHtml(item.key)}</th><td>${item.count}</td><td>${item.durationSeconds}</td></tr>`
+        `<tr><th scope="row">${escapeHtml(item.key)}</th><td>${escapeHtml(item.count)}</td><td>${escapeHtml(item.durationSeconds)}</td></tr>`
     )
     .join("");
-  return `<section><h2>${escapeHtml(title)}</h2><table><thead><tr><th>Bucket</th><th>Rows</th><th>Seconds</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+  const table = rows
+    ? `<table><thead><tr><th>Bucket</th><th>Rows</th><th>Seconds</th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<p>No bucket reached ${escapeHtml(minimumBucketCount)} rows.</p>`;
+  const note =
+    withheld && withheld.buckets > 0
+      ? `<p>${escapeHtml(withheld.buckets)} ${withheld.buckets === 1 ? "bucket" : "buckets"} with fewer than ${escapeHtml(minimumBucketCount)} rows (${escapeHtml(withheld.rows)} ${withheld.rows === 1 ? "row" : "rows"} in total) ${withheld.buckets === 1 ? "is" : "are"} not shown.</p>`
+      : "";
+  return `<section><h2>${escapeHtml(title)}</h2>${table}${note}</section>`;
 }
 
 export function createPortraitHtml(portraitInput) {
   const portrait = clone(portraitInput);
-  if (portrait.format !== "data-selfie.local-portrait" || portrait.version !== 1) {
+  if (portrait.format !== "data-selfie.local-portrait" || portrait.version !== 2) {
     throw new AnalysisError("A valid local portrait is required", "portrait");
   }
   const warnings = portrait.warnings
     .map(
       (warning) =>
-        `<li><strong>${escapeHtml(warning.code)}</strong>: ${escapeHtml(warning.message)} (${warning.count})</li>`
+        `<li><strong>${escapeHtml(warning.code)}</strong>: ${escapeHtml(warning.message)} (${escapeHtml(warning.count)})</li>`
     )
     .join("");
+  const { minimumBucketCount, withheld } = portrait.disclosureControl;
+  const table = (title, name) =>
+    aggregateTable(title, portrait.aggregates[name], withheld[name], minimumBucketCount);
   return `<!doctype html>
 <html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(portrait.title)}</title>
 <style>body{font-family:system-ui,sans-serif;line-height:1.5;margin:2rem auto;max-width:70rem;padding:0 1rem;color:#202521;background:#f5f4ed}h1,h2{font-family:Georgia,serif}section{border-top:1px solid #989b94;padding:1rem 0}table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #c4c5bf;padding:.4rem;text-align:left}aside{border:1px solid #8c918b;padding:1rem}</style>
 </head><body><header><p>Locally generated aggregate portrait</p><h1>${escapeHtml(portrait.title)}</h1><p>${escapeHtml(portrait.note)}</p></header>
 <aside><strong>Interpretation boundary.</strong> ${escapeHtml(portrait.boundary)}</aside>
-${aggregateTable("Daily texture", portrait.aggregates.daily)}
-${aggregateTable("Hourly rhythm", portrait.aggregates.hourly)}
-${aggregateTable("Categories", portrait.aggregates.categories)}
-${aggregateTable("Explicitly included entities", portrait.aggregates.entities)}
+<p>${escapeHtml(portrait.disclosureControl.rule)}</p>
+${table("Daily texture", "daily")}
+${table("Hourly rhythm", "hourly")}
+${table("Categories", "categories")}
+${table("Explicitly included entities", "entities")}
 <section><h2>Coverage warnings</h2><ul>${warnings || "<li>No exported warnings.</li>"}</ul></section>
 <section><h2>Privacy manifest</h2><pre>${escapeHtml(JSON.stringify(portrait.privacy, null, 2))}</pre></section>
 </body></html>`;
