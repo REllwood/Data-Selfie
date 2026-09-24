@@ -79,14 +79,17 @@ export function validateMapping(headersInput, mappingInput) {
   return { headers, mapping };
 }
 
+// Date and time, optional seconds and fraction (point or comma, up to
+// nanoseconds), then an optional zone: Z, UTC, GMT, or ±HH, ±HHMM, ±HH:MM.
+const timestampPattern =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*(?:([Zz]|UTC|GMT)|([+-])(\d{2})(?::?(\d{2}))?)?$/;
+
 export function parseWallTimestamp(value) {
   const rawTimestamp = String(value).trim();
-  const match = rawTimestamp.match(
-    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-](\d{2}):(\d{2}))?$/
-  );
+  const match = rawTimestamp.match(timestampPattern);
   if (!match) {
     throw new AnalysisError(
-      "Timestamp must use an ISO wall date and time with an optional Z or numeric offset",
+      "Timestamp must use an ISO 8601 date and time, optionally followed by Z, UTC or a numeric offset",
       "rows.timestamp",
       "INVALID_TIMESTAMP"
     );
@@ -97,6 +100,9 @@ export function parseWallTimestamp(value) {
   const hour = Number(match[4]);
   const minute = Number(match[5]);
   const second = Number(match[6] ?? "0");
+  // Fractions beyond milliseconds are truncated; Date cannot hold them.
+  const millisecond = Number((match[7] ?? "").padEnd(3, "0").slice(0, 3));
+  // setUTCFullYear keeps years 0–99 literal, unlike Date.UTC.
   const probe = new Date(0);
   probe.setUTCFullYear(year, month - 1, day);
   probe.setUTCHours(hour, minute, second, 0);
@@ -107,8 +113,9 @@ export function parseWallTimestamp(value) {
     probe.getUTCHours() === hour &&
     probe.getUTCMinutes() === minute &&
     probe.getUTCSeconds() === second;
-  const offsetHour = match[9] === undefined ? 0 : Number(match[9]);
-  const offsetMinute = match[10] === undefined ? 0 : Number(match[10]);
+  const offsetSign = match[9];
+  const offsetHour = offsetSign ? Number(match[10]) : 0;
+  const offsetMinute = offsetSign ? Number(match[11] ?? "0") : 0;
   if (!validWallDate || offsetHour > 23 || offsetMinute > 59) {
     throw new AnalysisError(
       "Timestamp contains an impossible calendar date, time or numeric offset",
@@ -116,8 +123,18 @@ export function parseWallTimestamp(value) {
       "INVALID_TIMESTAMP"
     );
   }
-  const zone = match[8] ?? null;
-  const parsedTimestamp = new Date(zone ? rawTimestamp : `${rawTimestamp}Z`);
+  const offsetMinutes = (offsetSign === "-" ? -1 : 1) * (offsetHour * 60 + offsetMinute);
+  // Normalise so "+1000", "+10" and "+10:00" count as one offset, and any
+  // zero offset (Z, UTC, GMT, +00:00, -00:00) is reported as Z.
+  let zone = null;
+  if (match[8] || (offsetSign && offsetMinutes === 0)) {
+    zone = "Z";
+  } else if (offsetSign) {
+    zone = `${offsetSign}${match[10]}:${match[11] ?? "00"}`;
+  }
+  // Built from the parsed parts rather than Date's lenient string parsing,
+  // which differs between engines for several of the accepted forms.
+  const parsedTimestamp = new Date(probe.getTime() + millisecond - offsetMinutes * 60_000);
   if (Number.isNaN(parsedTimestamp.getTime())) {
     throw new AnalysisError(
       "Timestamp cannot be represented by this runtime",

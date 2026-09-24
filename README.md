@@ -32,6 +32,18 @@ npm start
 
 Open http://127.0.0.1:4177 (set `PORT` or `HOST` to change where it listens), choose `examples/synthetic-listening.csv` or press **Use documented fixture**, check the mapping, then press **Analyse selected CSV**.
 
+## CSV format
+
+The first row must be a header with unique column names. You map columns to these fields:
+
+| Field | Required | Accepts |
+| --- | --- | --- |
+| Timestamp | Yes | ISO 8601 date and time, e.g. `2025-01-05T08:15:00+11:00`. A space instead of `T`, fractional seconds, and zones written as `Z`, `UTC`, `+10:00`, `+1000` or `+10` all work. Timestamps without a zone are kept as written and flagged. |
+| Category | Yes | Any text, such as a listening context |
+| Entity | No | Any text, such as an artist |
+| Duration | No | Seconds |
+| Record ID | No | A stable identifier, used to detect duplicates |
+
 ## Status
 
 v0.1 works with a generic CSV and is tested against a synthetic year of music listening. Next up are importers for specific platforms' exports, so you can drop in the file you downloaded and skip the mapping step.
