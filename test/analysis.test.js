@@ -284,3 +284,80 @@ test("equivalent offsets written differently count as one offset", () => {
   assert.deepEqual(result.coverage.explicitOffsets, ["+10:00"]);
   assert.ok(!result.warnings.some((warning) => warning.code === "timezone-offset-change"));
 });
+
+function zonedAccumulator(timeZone) {
+  return new PersonalDataAccumulator({
+    source: { name: "zones.csv" },
+    headers: ["timestamp", "category"],
+    mapping: { timestamp: "timestamp", category: "category" },
+    timeZone
+  });
+}
+
+test("a reporting time zone puts the same instant in the same day and hour", () => {
+  const accumulator = zonedAccumulator("Australia/Melbourne");
+  accumulator.ingest(["2025-01-01T22:15:00Z", "focus"], 2);
+  accumulator.ingest(["2025-01-02T09:15:00+11:00", "focus"], 3);
+  const result = accumulator.finalise();
+  assert.deepEqual(result.aggregates.daily.map((bucket) => bucket.key), ["2025-01-02"]);
+  assert.deepEqual(
+    result.aggregates.hourly.filter((bucket) => bucket.count > 0).map((bucket) => bucket.key),
+    ["09"]
+  );
+  assert.equal(result.coverage.timeBasis, "converted");
+  assert.equal(result.coverage.reportingTimeZone, "Australia/Melbourne");
+  assert.match(
+    result.warnings.find((warning) => warning.code === "timezone-offset-change").message,
+    /converted to the chosen reporting time zone/
+  );
+});
+
+test("conversion follows daylight saving changes and moves month boundaries", () => {
+  const accumulator = zonedAccumulator("Australia/Melbourne");
+  // 02:30 on 6 April 2025 happens twice in Melbourne: once at +11:00, once at +10:00.
+  accumulator.ingest(["2025-04-05T15:30:00Z", "focus"], 2);
+  accumulator.ingest(["2025-04-05T16:30:00Z", "focus"], 3);
+  // 20:00 UTC on 31 January is 07:00 on 1 February in Melbourne.
+  accumulator.ingest(["2025-01-31T20:00:00Z", "focus"], 4);
+  const result = accumulator.finalise();
+  assert.deepEqual(
+    result.aggregates.daily.map((bucket) => [bucket.key, bucket.count]),
+    [["2025-02-01", 1], ["2025-04-06", 2]]
+  );
+  assert.equal(result.aggregates.hourly.find((bucket) => bucket.key === "02").count, 2);
+  assert.deepEqual(result.coverage.presentMonths, ["2025-02", "2025-04"]);
+  assert.deepEqual(result.coverage.missingMonths, ["2025-03"]);
+});
+
+test("timestamps without a zone keep their written date and hour when converting", () => {
+  const accumulator = zonedAccumulator("Australia/Melbourne");
+  accumulator.ingest(["2025-01-01T23:30", "focus"], 2);
+  const result = accumulator.finalise();
+  assert.equal(result.aggregates.daily[0].key, "2025-01-01");
+  assert.equal(result.aggregates.hourly.find((bucket) => bucket.key === "23").count, 1);
+  assert.ok(result.warnings.some((warning) => warning.code === "missing-timezone"));
+});
+
+test("without a reporting time zone, times are counted as written", () => {
+  const accumulator = zonedAccumulator(null);
+  accumulator.ingest(["2025-01-01T22:15:00Z", "focus"], 2);
+  accumulator.ingest(["2025-01-02T09:15:00+11:00", "focus"], 3);
+  const result = accumulator.finalise();
+  assert.deepEqual(result.aggregates.daily.map((bucket) => bucket.key), ["2025-01-01", "2025-01-02"]);
+  assert.equal(result.coverage.timeBasis, "as-written");
+  assert.equal(result.coverage.reportingTimeZone, null);
+});
+
+test("an unknown reporting time zone is rejected", () => {
+  assert.throws(() => zonedAccumulator("Mars/Olympus_Mons"), (error) => error.code === "INVALID_TIME_ZONE");
+});
+
+test("portraits record the time basis but never the reporting time zone", () => {
+  const accumulator = zonedAccumulator("Australia/Melbourne");
+  accumulator.ingest(["2025-01-01T22:15:00Z", "focus"], 2);
+  const portrait = createPortrait(accumulator.finalise());
+  assert.equal(portrait.coverage.timeBasis, "converted");
+  assert.equal(portrait.privacy.reportingTimeZoneIncluded, false);
+  assert.doesNotMatch(JSON.stringify(portrait), /Melbourne|Australia/);
+  assert.doesNotMatch(createPortraitHtml(portrait), /Melbourne|Australia/);
+});
