@@ -199,10 +199,13 @@ function zonedWallTime(formatter, instant) {
   };
 }
 
-function sourceReference(source, rowNumber, recordId) {
+// row is the CSV record number; line is the physical line the record starts
+// on, which is later than row once an earlier quoted field spans lines.
+function sourceReference(source, rowNumber, line, recordId) {
   return {
     file: source.name,
     row: rowNumber,
+    line,
     ...(recordId ? { recordId } : {})
   };
 }
@@ -361,12 +364,13 @@ export class PersonalDataAccumulator {
     return seconds;
   }
 
-  ingest(rowInput, rowNumber) {
+  ingest(rowInput, rowNumber, line = rowNumber) {
     this.#importedRows += 1;
     const row = rowInput.map((value) => String(value));
     const reference = sourceReference(
       this.#source,
       rowNumber,
+      line,
       this.#value(row, "recordId")
     );
     if (row.length !== this.#headers.length) {

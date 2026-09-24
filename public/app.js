@@ -1,5 +1,5 @@
 import { PersonalDataAccumulator, createPortrait, createPortraitHtml } from "/src/analysis.js";
-import { csvLimits, parseCsvChunks } from "/src/csv.js";
+import { CsvError, csvLimits, parseCsvChunks } from "/src/csv.js";
 
 const mappingDefinitions = [
   { field: "timestamp", label: "Timestamp", required: true, aliases: ["played_at", "timestamp", "date"] },
@@ -140,6 +140,16 @@ function invalidateAnalysisForMapping() {
   );
 }
 
+// Row and column locate the problem in a spreadsheet; the line helps in a
+// text editor when an earlier quoted field spans several lines.
+function describeError(error) {
+  if (error instanceof CsvError) {
+    const line = error.line !== error.row ? ` (line ${error.line} in a text editor)` : "";
+    return `${error.message} at row ${error.row}, column ${error.column}${line}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function runOperation(label, operation) {
   currentController?.abort("superseded");
   const controller = new AbortController();
@@ -155,7 +165,7 @@ async function runOperation(label, operation) {
         setStatus("Operation cancelled. No source file was modified.", false);
       } else {
         setStatus(
-          `Could not complete the operation: ${error instanceof Error ? error.message : String(error)}. Choose a corrected file or mapping and retry.`,
+          `Could not complete the operation: ${describeError(error)}. Choose a corrected file or mapping and retry.`,
           false
         );
       }
@@ -418,6 +428,7 @@ function inspectMark(tableName, item) {
       const reference = document.createElement("li");
       reference.textContent =
         `${source.file}, source row ${source.row}` +
+        (source.line !== undefined && source.line !== source.row ? ` (line ${source.line})` : "") +
         (source.recordId ? `, identifier ${source.recordId}` : "");
       return reference;
     }),
@@ -560,7 +571,7 @@ elements.mappingForm.addEventListener("submit", async (event) => {
         if (row.values.length === 1 && row.values[0] === "") {
           continue;
         }
-        accumulator.ingest(row.values, row.rowNumber);
+        accumulator.ingest(row.values, row.rowNumber, row.line);
       }
       if (sourceRevision !== activeSourceRevision || analysisJob !== activeAnalysisJob) {
         throw new DOMException("Analysis superseded", "AbortError");

@@ -87,3 +87,32 @@ test("cancellation stops parsing before another row is yielded", async () => {
     (error) => error.name === "AbortError"
   );
 });
+
+test("rows report the physical line they start on", async () => {
+  for (const newline of ["\n", "\r\n", "\r"]) {
+    const text = ["h1,h2", 'a,"multi', "line", 'value"', "", "b,2", '"x', 'y",3'].join(newline) + newline;
+    const rows = await collectCsvRows(chunks([text]));
+    assert.deepEqual(
+      rows.map((row) => [row.rowNumber, row.line, row.values[0]]),
+      [[1, 1, "h1"], [2, 2, "a"], [3, 5, ""], [4, 6, "b"], [5, 7, `x${newline}y`]],
+      JSON.stringify(newline)
+    );
+  }
+});
+
+test("a CRLF split across chunks counts as one line break", async () => {
+  const rows = await collectCsvRows(chunks(["h\r", "\n1\r", "\n2"]));
+  assert.deepEqual(rows.map((row) => [row.rowNumber, row.line]), [[1, 1], [2, 2], [3, 3]]);
+});
+
+test("errors report the physical line as well as the row", async () => {
+  await assert.rejects(
+    () => collectCsvRows(chunks(['h1,h2\n"a\nb",1\nx,"open\nmore'])),
+    (error) =>
+      error.code === "UNTERMINATED_QUOTE" && error.row === 3 && error.column === 2 && error.line === 4
+  );
+  await assert.rejects(
+    () => collectCsvRows(chunks(['h\n"a\nb"\n"c"d\n'])),
+    (error) => error.message.includes("closing quote") && error.row === 3 && error.line === 4
+  );
+});
